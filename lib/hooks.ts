@@ -187,7 +187,7 @@ export const useQueue = (clinicId?: string) => {
     // Subscribe to realtime updates
     const subscription = supabase
       .channel(`queue${clinicId ? `-${clinicId}` : ''}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'queue' }, (payload) => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'queue' }, (payload: any) => {
         if (clinicId && payload.new?.clinic_id !== clinicId) return;
 
         if (payload.eventType === 'INSERT') {
