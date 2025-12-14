@@ -30,21 +30,21 @@ export const playSequentialAudio = async (files: string[]): Promise<void> => {
 };
 
 export const speakArabic = async (text: string, rate: number = 1): Promise<void> => {
-  if ('speechSynthesis' in window) {
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = 'ar-SA';
-    utterance.rate = rate;
-    utterance.pitch = 1;
-    utterance.volume = 1;
+  return new Promise((resolve, reject) => {
+    if ('speechSynthesis' in window) {
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = 'ar-SA';
+      utterance.rate = rate;
+      utterance.pitch = 1;
+      utterance.volume = 1;
 
-    return new Promise((resolve, reject) => {
       utterance.onend = () => resolve();
       utterance.onerror = () => reject(new Error('Speech synthesis failed'));
       window.speechSynthesis.speak(utterance);
-    });
-  } else {
-    reject(new Error('Speech synthesis not supported'));
-  }
+    } else {
+      reject(new Error('Speech synthesis not supported'));
+    }
+  });
 };
 
 // Date Utilities
