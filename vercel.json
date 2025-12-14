@@ -4,14 +4,8 @@
   "installCommand": "npm install --legacy-peer-deps",
   "framework": "nextjs",
   "env": {
-    "NEXT_PUBLIC_SUPABASE_URL": {
-      "description": "Supabase Project URL"
-    },
-    "NEXT_PUBLIC_SUPABASE_ANON_KEY": {
-      "description": "Supabase Anonymous Key"
-    },
-    "SUPABASE_SERVICE_ROLE_KEY": {
-      "description": "Supabase Service Role Key"
-    }
+    "NEXT_PUBLIC_SUPABASE_URL": "https://fgsvbahplrhnudfrhycu.supabase.co",
+    "NEXT_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZnc3ZiYWhwbHJobnVkZnJoeWN1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU3MDMxMDksImV4cCI6MjA4MTI3OTEwOX0.6l1x9CKluOTOsvdwULdw6JAtnCKOHXYB8_HMF-uHvzg", // Use a Vercel Secret for keys
+    "SUPABASE_SERVICE_ROLE_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZnc3ZiYWhwbHJobnVkZnJoeWN1Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2NTcwMzEwOSwiZXhwIjoyMDgxMjc5MTA5fQ.BxniF3E_S2y5LXY0NwUTpON3EOUpkTUIyjfzQ3H-nJE" // Use a Vercel Secret for keys
   }
 }
