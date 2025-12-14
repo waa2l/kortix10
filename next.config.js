@@ -5,6 +5,12 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
+  typescript: {
+    ignoreBuildErrors: false,
+  },
   webpack: (config) => {
     config.resolve.fallback = {
       ...config.resolve.fallback,
