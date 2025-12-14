@@ -1,27 +1,77 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useClinics, useQueue } from '@/lib/hooks';
-import { Lock, LogOut, Play, RotateCcw, AlertTriangle, Send, Pause } from 'lucide-react';
-import { toArabicNumbers, playAudio, getAudioFile } from '@/lib/utils'; // تأكد من استيراد دوال الصوت إذا كنت تريد تشغيل الصوت
+import { Lock, LogOut, Play, RotateCcw, AlertTriangle, Send, Pause, Bell } from 'lucide-react';
+import { toArabicNumbers, playSequentialAudio } from '@/lib/utils';
 
 export default function ControlPanel() {
   const router = useRouter();
-  // إضافة updateClinic هنا
+  
+  // Hooks
   const { clinics, loading: clinicsLoading, updateClinic } = useClinics();
-  const [isClient, setIsClient] = useState(false);
   const [selectedClinic, setSelectedClinic] = useState('');
+  
+  // States
+  const [isClient, setIsClient] = useState(false);
   const [password, setPassword] = useState('');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [error, setError] = useState('');
-  
-  // يتم استخدام queue إذا كنت تريد إدارة قائمة الانتظار، لكن التحكم الأساسي في الرقم يتم عبر العيادة
-  const { queue } = useQueue(selectedClinic);
+  const [notification, setNotification] = useState<{ show: boolean; message: string } | null>(null);
 
+  // Refs
+  const prevClinicsRef = useRef<typeof clinics>([]);
+
+  // Initialization
   useEffect(() => {
     setIsClient(true);
   }, []);
+
+  // --- Realtime Notification Logic (Listening to updates) ---
+  useEffect(() => {
+    if (!isAuthenticated || clinicsLoading) return;
+
+    clinics.forEach((clinic) => {
+      const prevClinic = prevClinicsRef.current.find((c) => c.id === clinic.id);
+      
+      // الكشف عن تغير وقت النداء
+      if (prevClinic && clinic.last_call_time !== prevClinic.last_call_time && clinic.last_call_time) {
+        const callTime = new Date(clinic.last_call_time).getTime();
+        const now = new Date().getTime();
+        
+        // إذا كان النداء حديثاً (أقل من 10 ثواني) والعيادة المختارة هي الحالية أو عيادة أخرى
+        if (now - callTime < 10000) {
+          triggerControlAlert(clinic);
+        }
+      }
+    });
+
+    prevClinicsRef.current = clinics;
+  }, [clinics, isAuthenticated]);
+
+  const triggerControlAlert = async (clinic: any) => {
+    // 1. إظهار التنبيه المرئي للموظف
+    setNotification({
+      show: true,
+      message: `تم نداء رقم ${toArabicNumbers(clinic.current_number)} - ${clinic.clinic_name}`
+    });
+    
+    setTimeout(() => setNotification(null), 5000);
+
+    // 2. تشغيل الصوت (اختياري في صفحة التحكم، لكن مفيد للتأكد من عمل النظام)
+    // إذا كنت لا تريد الصوت في صفحة التحكم، احذف هذا الجزء
+    const audioFiles = [
+      '/audio/ding.mp3',
+      `/audio/${clinic.current_number}.mp3`,
+      `/audio/clinic${clinic.clinic_number}.mp3`
+    ];
+    try {
+      await playSequentialAudio(audioFiles);
+    } catch (e) { console.error("Audio playback error", e); }
+  };
+
+  // --- Handlers ---
 
   const handlePasswordSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -36,36 +86,28 @@ export default function ControlPanel() {
     if (password === clinic.control_password) {
       setIsAuthenticated(true);
       setPassword('');
+      prevClinicsRef.current = clinics; // Reset ref on login
     } else {
       setError('كلمة المرور غير صحيحة');
     }
   };
 
-  // 1. تفعيل زر العميل التالي
   const handleNextPatient = async () => {
     const clinic = clinics.find((c) => c.id === selectedClinic);
     if (clinic) {
       try {
         const newNumber = clinic.current_number + 1;
-        
-        // تحديث قاعدة البيانات
         await updateClinic(clinic.id, { 
           current_number: newNumber,
           last_call_time: new Date().toISOString()
         });
-
-        // تشغيل الصوت (اختياري - يتم عادة في شاشة العرض، لكن يمكن تشغيله هنا للموظف)
-        // const audioFile = getAudioFile('number', newNumber);
-        // await playAudio(audioFile);
-        
       } catch (err) {
-        console.error('فشل التحديث', err);
-        alert('حدث خطأ أثناء تحديث الرقم');
+        console.error('Update failed', err);
+        alert('فشل التحديث، حاول مرة أخرى');
       }
     }
   };
 
-  // 2. تفعيل زر العميل السابق
   const handlePreviousPatient = async () => {
     const clinic = clinics.find((c) => c.id === selectedClinic);
     if (clinic && clinic.current_number > 0) {
@@ -74,12 +116,25 @@ export default function ControlPanel() {
           current_number: clinic.current_number - 1 
         });
       } catch (err) {
-        console.error('فشل التحديث', err);
+        console.error('Update failed', err);
       }
     }
   };
 
-  // 3. تفعيل زر التصفير
+  const handleRepeatCall = async () => {
+    const clinic = clinics.find((c) => c.id === selectedClinic);
+    if (clinic && clinic.current_number > 0) {
+       try {
+          // تحديث الوقت فقط لإعادة إطلاق التنبيه
+          await updateClinic(clinic.id, { 
+            last_call_time: new Date().toISOString() 
+          });
+        } catch (err) {
+          console.error('Repeat call failed', err);
+        }
+    }
+  };
+
   const handleReset = async () => {
     if (confirm('هل أنت متأكد من تصفير عداد العيادة؟')) {
       const clinic = clinics.find((c) => c.id === selectedClinic);
@@ -90,29 +145,14 @@ export default function ControlPanel() {
             last_call_time: null
           });
         } catch (err) {
-          console.error('فشل التصفير', err);
+          console.error('Reset failed', err);
         }
       }
     }
   };
 
-  // 4. تفعيل تكرار النداء (تحديث وقت النداء فقط ليظهر في الشاشات كأنه جديد)
-  const handleRepeatCall = async () => {
-    const clinic = clinics.find((c) => c.id === selectedClinic);
-    if (clinic) {
-       try {
-          await updateClinic(clinic.id, { 
-            last_call_time: new Date().toISOString() // تحديث الوقت سيطلق التنبيه في الشاشات المراقبة للتغييرات
-          });
-        } catch (err) {
-          console.error('فشل تكرار النداء', err);
-        }
-    }
-  };
-
   const handleEmergency = async () => {
-    alert('سيتم تفعيل نظام الطوارئ (يحتاج لتنفيذ منطق إضافي في قاعدة البيانات)');
-    // يمكنك إضافة حقل is_emergency في جدول العيادات وتحديثه هنا
+    alert('تنبيه الطوارئ: سيتم إرسال إشعار لجميع الشاشات (يتطلب تفعيل المنطق في قاعدة البيانات)');
   };
 
   const handleLogout = () => {
@@ -121,11 +161,13 @@ export default function ControlPanel() {
     setPassword('');
   };
 
+  // --- Render ---
+
   if (!isClient || clinicsLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-blue-600 to-purple-600">
         <div className="text-center text-white">
-          <div className="spinner mb-4"></div>
+          <div className="spinner mb-4 border-white border-t-transparent"></div>
           <p>جاري التحميل...</p>
         </div>
       </div>
@@ -176,10 +218,7 @@ export default function ControlPanel() {
               />
             </div>
 
-            <button
-              type="submit"
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg transition-colors"
-            >
+            <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg transition-colors">
               دخول
             </button>
           </form>
@@ -191,7 +230,16 @@ export default function ControlPanel() {
   const clinic = clinics.find((c) => c.id === selectedClinic);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 to-black text-white p-8">
+    <div className="min-h-screen bg-gradient-to-br from-gray-900 to-black text-white p-8 relative overflow-hidden font-cairo">
+      
+      {/* Notification Bar */}
+      <div className={`fixed top-0 left-0 w-full z-50 transform transition-transform duration-300 ${notification ? 'translate-y-0' : '-translate-y-full'}`}>
+        <div className="bg-green-600 p-4 shadow-lg flex items-center justify-center gap-3">
+          <Bell className="w-6 h-6 text-white animate-bounce" />
+          <p className="text-xl font-bold text-white">{notification?.message}</p>
+        </div>
+      </div>
+
       {/* Header */}
       <div className="max-w-6xl mx-auto mb-8">
         <div className="flex items-center justify-between mb-8">
@@ -209,9 +257,10 @@ export default function ControlPanel() {
         </div>
 
         {/* Main Display */}
-        <div className="bg-gradient-to-r from-blue-900 to-purple-900 rounded-lg p-12 text-center mb-8 border-2 border-blue-500">
-          <p className="text-gray-300 text-lg mb-4">الرقم الحالي</p>
-          <p className="text-8xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400">
+        <div className="bg-gradient-to-r from-blue-900 to-purple-900 rounded-lg p-12 text-center mb-8 border-2 border-blue-500 shadow-2xl relative overflow-hidden group">
+          <div className="absolute inset-0 bg-blue-500/10 blur-xl group-hover:bg-blue-500/20 transition-all"></div>
+          <p className="text-gray-300 text-lg mb-4 relative z-10">الرقم الحالي</p>
+          <p className="text-9xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400 relative z-10 drop-shadow-lg">
             {toArabicNumbers(clinic?.current_number || 0)}
           </p>
         </div>
@@ -222,7 +271,7 @@ export default function ControlPanel() {
         {/* Next Patient */}
         <button
           onClick={handleNextPatient}
-          className="bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 p-8 rounded-lg transition-all transform hover:scale-105 flex items-center justify-center gap-4"
+          className="bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 p-8 rounded-xl transition-all transform hover:scale-105 active:scale-95 flex items-center justify-center gap-4 shadow-lg border-b-4 border-green-900"
         >
           <Play className="w-8 h-8" />
           <span className="text-2xl font-bold">العميل التالي</span>
@@ -231,7 +280,7 @@ export default function ControlPanel() {
         {/* Previous Patient */}
         <button
           onClick={handlePreviousPatient}
-          className="bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 p-8 rounded-lg transition-all transform hover:scale-105 flex items-center justify-center gap-4"
+          className="bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 p-8 rounded-xl transition-all transform hover:scale-105 active:scale-95 flex items-center justify-center gap-4 shadow-lg border-b-4 border-blue-900"
         >
           <RotateCcw className="w-8 h-8" />
           <span className="text-2xl font-bold">العميل السابق</span>
@@ -240,7 +289,7 @@ export default function ControlPanel() {
         {/* Repeat Call */}
         <button
           onClick={handleRepeatCall}
-          className="bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 p-8 rounded-lg transition-all transform hover:scale-105 flex items-center justify-center gap-4"
+          className="bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 p-8 rounded-xl transition-all transform hover:scale-105 active:scale-95 flex items-center justify-center gap-4 shadow-lg border-b-4 border-purple-900"
         >
           <Send className="w-8 h-8" />
           <span className="text-2xl font-bold">تكرار النداء</span>
@@ -249,7 +298,7 @@ export default function ControlPanel() {
         {/* Reset Clinic */}
         <button
           onClick={handleReset}
-          className="bg-gradient-to-r from-orange-600 to-orange-700 hover:from-orange-700 hover:to-orange-800 p-8 rounded-lg transition-all transform hover:scale-105 flex items-center justify-center gap-4"
+          className="bg-gradient-to-r from-orange-600 to-orange-700 hover:from-orange-700 hover:to-orange-800 p-8 rounded-xl transition-all transform hover:scale-105 active:scale-95 flex items-center justify-center gap-4 shadow-lg border-b-4 border-orange-900"
         >
           <RotateCcw className="w-8 h-8" />
           <span className="text-2xl font-bold">تصفير العيادة</span>
@@ -257,8 +306,8 @@ export default function ControlPanel() {
 
         {/* Pause Clinic */}
         <button
-          onClick={() => alert('إيقاف العيادة (غير مفعل)')}
-          className="bg-gradient-to-r from-yellow-600 to-yellow-700 hover:from-yellow-700 hover:to-yellow-800 p-8 rounded-lg transition-all transform hover:scale-105 flex items-center justify-center gap-4"
+          onClick={() => alert('إيقاف العيادة (غير مفعل حالياً)')}
+          className="bg-gradient-to-r from-yellow-600 to-yellow-700 hover:from-yellow-700 hover:to-yellow-800 p-8 rounded-xl transition-all transform hover:scale-105 active:scale-95 flex items-center justify-center gap-4 shadow-lg border-b-4 border-yellow-900"
         >
           <Pause className="w-8 h-8" />
           <span className="text-2xl font-bold">إيقاف العيادة</span>
@@ -267,7 +316,7 @@ export default function ControlPanel() {
         {/* Emergency Alert */}
         <button
           onClick={handleEmergency}
-          className="bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 p-8 rounded-lg transition-all transform hover:scale-105 flex items-center justify-center gap-4 animate-pulse"
+          className="bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 p-8 rounded-xl transition-all transform hover:scale-105 active:scale-95 flex items-center justify-center gap-4 shadow-lg border-b-4 border-red-900 animate-pulse"
         >
           <AlertTriangle className="w-8 h-8" />
           <span className="text-2xl font-bold">تنبيه طوارئ</span>
@@ -277,25 +326,31 @@ export default function ControlPanel() {
       {/* Additional Controls */}
       <div className="max-w-6xl mx-auto mt-12 grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Call Specific Patient */}
-        <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
-          <h3 className="text-xl font-bold mb-4">نداء عميل معين</h3>
+        <div className="bg-gray-800 rounded-xl p-6 border border-gray-700 shadow-xl">
+          <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
+            <Send className="w-5 h-5 text-blue-400" />
+            نداء عميل معين
+          </h3>
           <div className="flex gap-2">
             <input
               type="number"
               placeholder="رقم العميل"
-              className="flex-1 px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="flex-1 px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
             />
-            <button className="bg-blue-600 hover:bg-blue-700 px-6 py-2 rounded-lg transition-colors">
+            <button className="bg-blue-600 hover:bg-blue-700 px-8 py-2 rounded-lg transition-colors font-bold shadow-md">
               نداء
             </button>
           </div>
         </div>
 
         {/* Transfer Patient */}
-        <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
-          <h3 className="text-xl font-bold mb-4">تحويل عميل</h3>
+        <div className="bg-gray-800 rounded-xl p-6 border border-gray-700 shadow-xl">
+          <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
+            <RotateCcw className="w-5 h-5 text-purple-400" />
+            تحويل عميل
+          </h3>
           <div className="flex gap-2">
-            <select className="flex-1 px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <select className="flex-1 px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500 transition-all">
               <option>-- اختر عيادة --</option>
               {clinics.map((c) => (
                 <option key={c.id} value={c.id}>
@@ -303,7 +358,7 @@ export default function ControlPanel() {
                 </option>
               ))}
             </select>
-            <button className="bg-purple-600 hover:bg-purple-700 px-6 py-2 rounded-lg transition-colors">
+            <button className="bg-purple-600 hover:bg-purple-700 px-8 py-2 rounded-lg transition-colors font-bold shadow-md">
               تحويل
             </button>
           </div>
