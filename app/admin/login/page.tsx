@@ -13,7 +13,7 @@ export default function AdminLogin() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const handleLogin = async (e: React.FormEvent) => {
+const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError('');
@@ -26,15 +26,19 @@ export default function AdminLogin() {
 
       if (authError) throw authError;
 
-// حفظ في localStorage للاستخدام في الواجهة الأمامية
-localStorage.setItem('adminSession', JSON.stringify(data.session));
+      // 1. حفظ الجلسة في localStorage (ضروري لأن صفحة الداشبورد تبحث عنه هنا)
+      localStorage.setItem('adminSession', JSON.stringify(data.session));
 
-// حفظ في Cookies لكي يراها الـ Middleware
-document.cookie = `adminSession=true; path=/; max-age=${60 * 60 * 24}; SameSite=Lax`;
-      router.push('/admin/dashboard');
+      // 2. حفظ الكوكي (ضروري لأن الـ Middleware يبحث عنه هنا)
+      // لاحظ: path=/ مهم جداً ليكون الكوكي متاحاً في صفحة الداشبورد
+      document.cookie = `adminSession=true; path=/; max-age=${60 * 60 * 24}; SameSite=Lax`;
+
+      // 3. استخدام window.location.href بدلاً من router.push
+      // هذا يضمن تحديث المتصفح وإرسال الكوكيز الجديدة بشكل صحيح للخادم
+      window.location.href = '/admin/dashboard';
+      
     } catch (err) {
       setError(err instanceof Error ? err.message : 'خطأ في تسجيل الدخول');
-    } finally {
       setLoading(false);
     }
   };
