@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { useClinics, useQueue } from '@/lib/hooks'; // تأكد من وجود useQueue
-import { supabase } from '@/lib/supabase'; // استدعاء مباشر لـ supabase للـ Broadcast
+import { useClinics, useQueue } from '@/lib/hooks';
+import { supabase } from '@/lib/supabase';
 import { Lock, LogOut, Play, RotateCcw, AlertTriangle, Send, Pause, Bell, MessageSquare, X } from 'lucide-react';
 import { toArabicNumbers, playSequentialAudio, playAudio } from '@/lib/utils';
 
@@ -12,7 +12,7 @@ export default function ControlPanel() {
   
   // Hooks
   const { clinics, loading: clinicsLoading, updateClinic } = useClinics();
-  const { addToQueue } = useQueue(); // نحتاج هذا لإضافة حالة الطوارئ
+  const { addToQueue } = useQueue();
   
   // States
   const [isClient, setIsClient] = useState(false);
@@ -49,7 +49,6 @@ export default function ControlPanel() {
         const now = new Date().getTime();
         
         if (now - callTime < 10000) {
-          // تنبيه الموظف
           triggerControlAlert(
             `تم نداء رقم ${toArabicNumbers(clinic.current_number)} - ${clinic.clinic_name}`,
             'normal',
@@ -70,7 +69,6 @@ export default function ControlPanel() {
     
     channel
       .on('broadcast', { event: 'clinic-message' }, (payload) => {
-        // إذا كانت الرسالة موجهة لهذه العيادة
         if (payload.payload.targetClinicId === selectedClinic) {
           triggerControlAlert(
             `رسالة من ${payload.payload.senderName}: ${payload.payload.message}`,
@@ -87,13 +85,10 @@ export default function ControlPanel() {
   }, [selectedClinic, isAuthenticated]);
 
 
-  // دالة التنبيه الموحدة (صوت + صورة)
   const triggerControlAlert = async (message: string, type: 'normal' | 'emergency' | 'message' = 'normal', audioFiles: string[] = []) => {
-    // إظهار الإشعار
     setNotification({ show: true, message, type });
     setTimeout(() => setNotification(null), 8000);
 
-    // تشغيل الصوت
     if (audioFiles.length > 0) {
       try {
         await playSequentialAudio(audioFiles);
@@ -174,16 +169,17 @@ export default function ControlPanel() {
       const clinic = clinics.find((c) => c.id === selectedClinic);
       if (clinic) {
         try {
-          // 1. إضافة تذكرة طوارئ في الطابور (هذا ما ستستمع له الشاشة)
-          // نستخدم رقم مميز مثل 999 أو نفس الرقم الحالي
+          // تم التصحيح هنا بإضافة الحقول المفقودة
           await addToQueue({
             clinic_id: clinic.id,
             ticket_number: clinic.current_number, 
             status: 'called',
-            is_emergency: true
+            is_emergency: true,
+            patient_id: null,
+            called_at: new Date().toISOString(),
+            completed_at: null
           });
 
-          // 2. تشغيل صوت الطوارئ عند الموظف للتأكيد
           triggerControlAlert('تم إطلاق نداء الطوارئ!', 'emergency', ['/audio/emergency.mp3']);
           
         } catch (err) {
@@ -362,7 +358,7 @@ export default function ControlPanel() {
               <div>
                 <label className="block text-sm text-gray-400 mb-2">إلى عيادة</label>
                 <select value={msgTargetClinic} onChange={(e) => setMsgTargetClinic(e.target.value)} className="w-full bg-gray-700 border-gray-600 rounded-lg px-4 py-3">
-                  <option value="">-- اختر العيادة --</option>
+                  <option value="">-- اختر عيادة --</option>
                   {clinics.filter(c => c.id !== selectedClinic).map(c => (
                     <option key={c.id} value={c.id}>{c.clinic_name}</option>
                   ))}
