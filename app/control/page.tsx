@@ -4,17 +4,20 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useClinics, useQueue } from '@/lib/hooks';
 import { Lock, LogOut, Play, RotateCcw, AlertTriangle, Send, Pause } from 'lucide-react';
-import { toArabicNumbers } from '@/lib/utils';
+import { toArabicNumbers, playAudio, getAudioFile } from '@/lib/utils'; // تأكد من استيراد دوال الصوت إذا كنت تريد تشغيل الصوت
 
 export default function ControlPanel() {
   const router = useRouter();
-  const { clinics, loading: clinicsLoading } = useClinics();
+  // إضافة updateClinic هنا
+  const { clinics, loading: clinicsLoading, updateClinic } = useClinics();
   const [isClient, setIsClient] = useState(false);
   const [selectedClinic, setSelectedClinic] = useState('');
   const [password, setPassword] = useState('');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [error, setError] = useState('');
-  const { queue, updateQueue } = useQueue(selectedClinic);
+  
+  // يتم استخدام queue إذا كنت تريد إدارة قائمة الانتظار، لكن التحكم الأساسي في الرقم يتم عبر العيادة
+  const { queue } = useQueue(selectedClinic);
 
   useEffect(() => {
     setIsClient(true);
@@ -38,32 +41,78 @@ export default function ControlPanel() {
     }
   };
 
+  // 1. تفعيل زر العميل التالي
   const handleNextPatient = async () => {
     const clinic = clinics.find((c) => c.id === selectedClinic);
     if (clinic) {
-      const newNumber = clinic.current_number + 1;
-      // Update clinic current number
-      // This would be done via API call
+      try {
+        const newNumber = clinic.current_number + 1;
+        
+        // تحديث قاعدة البيانات
+        await updateClinic(clinic.id, { 
+          current_number: newNumber,
+          last_call_time: new Date().toISOString()
+        });
+
+        // تشغيل الصوت (اختياري - يتم عادة في شاشة العرض، لكن يمكن تشغيله هنا للموظف)
+        // const audioFile = getAudioFile('number', newNumber);
+        // await playAudio(audioFile);
+        
+      } catch (err) {
+        console.error('فشل التحديث', err);
+        alert('حدث خطأ أثناء تحديث الرقم');
+      }
     }
   };
 
+  // 2. تفعيل زر العميل السابق
   const handlePreviousPatient = async () => {
     const clinic = clinics.find((c) => c.id === selectedClinic);
     if (clinic && clinic.current_number > 0) {
-      const newNumber = clinic.current_number - 1;
-      // Update clinic current number
+      try {
+        await updateClinic(clinic.id, { 
+          current_number: clinic.current_number - 1 
+        });
+      } catch (err) {
+        console.error('فشل التحديث', err);
+      }
     }
   };
 
+  // 3. تفعيل زر التصفير
   const handleReset = async () => {
-    if (confirm('هل تريد تصفير العيادة؟')) {
-      // Reset clinic number to 0
+    if (confirm('هل أنت متأكد من تصفير عداد العيادة؟')) {
+      const clinic = clinics.find((c) => c.id === selectedClinic);
+      if (clinic) {
+        try {
+          await updateClinic(clinic.id, { 
+            current_number: 0,
+            last_call_time: null
+          });
+        } catch (err) {
+          console.error('فشل التصفير', err);
+        }
+      }
+    }
+  };
+
+  // 4. تفعيل تكرار النداء (تحديث وقت النداء فقط ليظهر في الشاشات كأنه جديد)
+  const handleRepeatCall = async () => {
+    const clinic = clinics.find((c) => c.id === selectedClinic);
+    if (clinic) {
+       try {
+          await updateClinic(clinic.id, { 
+            last_call_time: new Date().toISOString() // تحديث الوقت سيطلق التنبيه في الشاشات المراقبة للتغييرات
+          });
+        } catch (err) {
+          console.error('فشل تكرار النداء', err);
+        }
     }
   };
 
   const handleEmergency = async () => {
-    // Play emergency sound and show alert
-    alert('تنبيه طوارئ!');
+    alert('سيتم تفعيل نظام الطوارئ (يحتاج لتنفيذ منطق إضافي في قاعدة البيانات)');
+    // يمكنك إضافة حقل is_emergency في جدول العيادات وتحديثه هنا
   };
 
   const handleLogout = () => {
@@ -190,7 +239,7 @@ export default function ControlPanel() {
 
         {/* Repeat Call */}
         <button
-          onClick={() => alert('تكرار النداء')}
+          onClick={handleRepeatCall}
           className="bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 p-8 rounded-lg transition-all transform hover:scale-105 flex items-center justify-center gap-4"
         >
           <Send className="w-8 h-8" />
@@ -208,7 +257,7 @@ export default function ControlPanel() {
 
         {/* Pause Clinic */}
         <button
-          onClick={() => alert('إيقاف العيادة')}
+          onClick={() => alert('إيقاف العيادة (غير مفعل)')}
           className="bg-gradient-to-r from-yellow-600 to-yellow-700 hover:from-yellow-700 hover:to-yellow-800 p-8 rounded-lg transition-all transform hover:scale-105 flex items-center justify-center gap-4"
         >
           <Pause className="w-8 h-8" />
