@@ -2,21 +2,21 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { useClinics, useSettings, useDoctors } from '@/lib/hooks'; // أضفنا useDoctors
+import { useClinics, useSettings, useDoctors } from '@/lib/hooks'; 
 import { 
   Lock, LogOut, Maximize, Minimize, Volume2, VolumeX, Bell, 
-  Activity, Ban, CheckCircle, Clock, User
+  Activity, Ban, Clock, User, ZoomIn, ZoomOut
 } from 'lucide-react';
 import { 
   toArabicNumbers, getArabicDate, getArabicTime, playSequentialAudio 
-} from '@/lib/utils'; //
+} from '@/lib/utils'; 
 
 export default function DisplayScreen() {
   const router = useRouter();
   
   // Hooks
   const { clinics, loading: clinicsLoading } = useClinics();
-  const { doctors, loading: doctorsLoading } = useDoctors(); // جلب الأطباء
+  const { doctors } = useDoctors(); 
   const { settings } = useSettings();
 
   // States
@@ -28,6 +28,9 @@ export default function DisplayScreen() {
   const [isMuted, setIsMuted] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
   
+  // حالة التكبير (Zoom)
+  const [isZoomed, setIsZoomed] = useState(false);
+  
   // Doctor Rotator State
   const [currentDoctorIndex, setCurrentDoctorIndex] = useState(0);
 
@@ -36,6 +39,8 @@ export default function DisplayScreen() {
   
   // Ref for tracking changes
   const prevClinicsRef = useRef<typeof clinics>([]);
+  // لتجنب التنبيه عند التحميل الأول للصفحة
+  const isFirstLoad = useRef(true);
 
   // Initialization
   useEffect(() => {
@@ -53,7 +58,7 @@ export default function DisplayScreen() {
     if (doctors.length > 0) {
       const doctorTimer = setInterval(() => {
         setCurrentDoctorIndex((prev) => (prev + 1) % doctors.length);
-      }, 10000); // 10 ثواني
+      }, 10000); 
       return () => clearInterval(doctorTimer);
     }
   }, [doctors]);
@@ -62,22 +67,24 @@ export default function DisplayScreen() {
   useEffect(() => {
     if (!isAuthenticated || clinicsLoading) return;
 
+    // إذا كان هذا أول تحميل للبيانات، نقوم فقط بتخزين الحالة ونتجاوز التنبيه
+    if (isFirstLoad.current && clinics.length > 0) {
+      prevClinicsRef.current = clinics;
+      isFirstLoad.current = false;
+      return;
+    }
+
     clinics.forEach((clinic) => {
       const prevClinic = prevClinicsRef.current.find((c) => c.id === clinic.id);
       
-      // Check for new calls
+      // نتحقق فقط من تغير وقت النداء (بغض النظر عن التوقيت الفعلي لتجنب مشاكل المناطق الزمنية)
       if (prevClinic && clinic.last_call_time !== prevClinic.last_call_time && clinic.last_call_time) {
-        const callTime = new Date(clinic.last_call_time).getTime();
-        const now = new Date().getTime();
-        
-        if (now - callTime < 10000) {
           triggerAlert(clinic);
-        }
       }
     });
 
     prevClinicsRef.current = clinics;
-  }, [clinics, isAuthenticated, isMuted]);
+  }, [clinics, isAuthenticated, isMuted, clinicsLoading]);
 
   const triggerAlert = async (clinic: any) => {
     // 1. Show Visual Notification
@@ -87,6 +94,7 @@ export default function DisplayScreen() {
       subtext: `يرجى التوجه إلى ${clinic.clinic_name}`
     });
 
+    // إخفاء التنبيه بعد 10 ثواني
     setTimeout(() => {
       setNotification(null);
     }, 10000);
@@ -95,8 +103,8 @@ export default function DisplayScreen() {
     if (!isMuted) {
       const audioFiles = [
         '/audio/ding.mp3',
-        `/audio/${clinic.current_number}.mp3`,
-        `/audio/clinic${clinic.clinic_number}.mp3`
+        `/audio/${clinic.current_number}.mp3`, // تأكد أن ملفات الأرقام موجودة
+        `/audio/clinic${clinic.clinic_number}.mp3` // تأكد أن ملفات العيادات موجودة
       ];
 
       try {
@@ -110,10 +118,9 @@ export default function DisplayScreen() {
   // Auth Handlers
   const handlePasswordSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (password === 'screen123') { // كلمة مرور ثابتة للتجربة كما في الكود الأصلي
+    if (password === 'screen123') { 
       setIsAuthenticated(true);
       setPassword('');
-      prevClinicsRef.current = clinics;
     } else {
       alert('كلمة المرور غير صحيحة');
     }
@@ -177,8 +184,6 @@ export default function DisplayScreen() {
 
   // Filter clinics for current screen
   const screenClinics = clinics.filter((c) => c.screen_id === clinics[selectedScreen - 1]?.screen_id);
-  
-  // Current Doctor Data
   const currentDoctor = doctors[currentDoctorIndex % doctors.length];
 
   return (
@@ -223,7 +228,16 @@ export default function DisplayScreen() {
               <option key={num} value={num}>شاشة {toArabicNumbers(num)}</option>
             ))}
           </select>
-          <div className="flex bg-slate-700 rounded-lg p-1">
+          <div className="flex bg-slate-700 rounded-lg p-1 gap-1">
+             {/* زر التكبير/التصغير */}
+             <button 
+               onClick={() => setIsZoomed(!isZoomed)} 
+               className={`p-2 rounded transition-colors ${isZoomed ? 'bg-blue-600 text-white' : 'hover:bg-slate-600'}`}
+               title={isZoomed ? "تصغير القائمة" : "تكبير القائمة"}
+             >
+               {isZoomed ? <ZoomOut className="w-5 h-5"/> : <ZoomIn className="w-5 h-5"/>}
+             </button>
+
              <button onClick={handleFullscreen} className="p-2 hover:bg-slate-600 rounded transition-colors" title="ملء الشاشة">
                {isFullscreen ? <Minimize className="w-5 h-5"/> : <Maximize className="w-5 h-5"/>}
              </button>
@@ -240,8 +254,8 @@ export default function DisplayScreen() {
       {/* === Main Layout === */}
       <div className="flex-1 flex overflow-hidden">
         
-        {/* --- Left Column (1/3): Clinics List --- */}
-        <div className="w-1/3 bg-slate-100/5 backdrop-blur-sm border-l border-slate-700 p-4 flex flex-col gap-4 overflow-y-auto custom-scrollbar">
+        {/* --- Left Column: Clinics List (Dynamic Width) --- */}
+        <div className={`${isZoomed ? 'w-2/3' : 'w-1/3'} bg-slate-100/5 backdrop-blur-sm border-l border-slate-700 p-4 flex flex-col gap-4 overflow-y-auto custom-scrollbar transition-all duration-300 ease-in-out`}>
           {screenClinics.length === 0 ? (
             <div className="flex-1 flex items-center justify-center text-slate-500">
                <p>لا توجد عيادات معينة لهذه الشاشة</p>
@@ -253,7 +267,7 @@ export default function DisplayScreen() {
                 className={`
                   relative overflow-hidden rounded-xl border transition-all duration-300 shadow-lg
                   ${clinic.is_active 
-                    ? 'bg-white border-blue-100 transform hover:scale-[1.02]' 
+                    ? 'bg-white border-blue-100 transform hover:scale-[1.01]' 
                     : 'bg-slate-200 border-slate-300 opacity-60 grayscale'
                   }
                 `}
@@ -263,11 +277,11 @@ export default function DisplayScreen() {
                 
                 <div className="p-5 pr-7">
                   {/* Top Line: Name & Number */}
-                  <div className="flex justify-between items-start mb-3">
-                    <h3 className={`text-2xl font-bold ${clinic.is_active ? 'text-slate-800' : 'text-slate-600'}`}>
+                  <div className="flex justify-between items-center mb-3">
+                    <h3 className={`font-bold ${isZoomed ? 'text-4xl' : 'text-2xl'} ${clinic.is_active ? 'text-slate-800' : 'text-slate-600'} transition-all`}>
                       {clinic.clinic_name}
                     </h3>
-                    <span className={`text-6xl font-black ${clinic.is_active ? 'text-blue-600' : 'text-slate-500'}`}>
+                    <span className={`font-black ${isZoomed ? 'text-8xl' : 'text-6xl'} ${clinic.is_active ? 'text-blue-600' : 'text-slate-500'} transition-all`}>
                       {toArabicNumbers(clinic.current_number)}
                     </span>
                   </div>
@@ -301,8 +315,8 @@ export default function DisplayScreen() {
           )}
         </div>
 
-        {/* --- Right Column (2/3): Video & Doctor --- */}
-        <div className="w-2/3 flex flex-col bg-black">
+        {/* --- Right Column: Video & Doctor (Dynamic Width) --- */}
+        <div className={`${isZoomed ? 'w-1/3' : 'w-2/3'} flex flex-col bg-black transition-all duration-300 ease-in-out`}>
           
           {/* Top: Educational Video (Flex Grow) */}
           <div className="flex-1 relative bg-black flex items-center justify-center overflow-hidden group">
@@ -315,8 +329,6 @@ export default function DisplayScreen() {
                </div>
                <p className="text-slate-500 text-xl">فيديو توعوي</p>
             </div>
-            
-            {/* Overlay for "Now Serving" optional feature if needed */}
           </div>
 
           {/* Bottom: Doctor Rotator (Fixed Height) */}
@@ -325,29 +337,22 @@ export default function DisplayScreen() {
                <div key={currentDoctor.id} className="h-full flex items-center p-6 animate-slide-in-bottom">
                  {/* Doctor Image */}
                  <div className="w-32 h-32 rounded-full border-4 border-blue-500 overflow-hidden shadow-2xl flex-shrink-0 bg-white">
-                   {/* Replace with actual image tag if available */}
                    <div className="w-full h-full bg-slate-200 flex items-center justify-center text-slate-400">
                      <User className="w-16 h-16" />
                    </div>
                  </div>
                  
                  {/* Doctor Info */}
-                 <div className="mr-8 flex-1">
+                 <div className="mr-6 flex-1">
                     <div className="flex items-center gap-3 mb-2">
                        <span className="bg-blue-600 text-white text-xs px-2 py-1 rounded">الطبيب المناوب</span>
-                       <div className="h-1 w-20 bg-blue-500/30 rounded-full overflow-hidden">
-                          <div className="h-full bg-blue-400 animate-pulse w-full"></div>
-                       </div>
                     </div>
-                    <h2 className="text-3xl font-bold text-white mb-1">{currentDoctor.full_name}</h2>
-                    <p className="text-xl text-blue-300 flex items-center gap-2">
-                      <Activity className="w-5 h-5"/>
+                    <h2 className="text-2xl font-bold text-white mb-1">{currentDoctor.full_name}</h2>
+                    <p className="text-lg text-blue-300 flex items-center gap-2">
+                      <Activity className="w-4 h-4"/>
                       {currentDoctor.specialization}
                     </p>
                  </div>
-
-                 {/* Decorative Background Icon */}
-                 <User className="absolute -left-10 -bottom-10 w-64 h-64 text-white/5 rotate-12" />
                </div>
              ) : (
                <div className="h-full flex items-center justify-center text-slate-500">
