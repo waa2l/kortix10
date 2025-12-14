@@ -2,24 +2,17 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { useClinics, useSettings, useDoctors } from '@/lib/hooks'; 
-import { 
-  Lock, LogOut, Maximize, Minimize, Volume2, VolumeX, Bell, 
-  Activity, Ban, Clock, User, ZoomIn, ZoomOut
-} from 'lucide-react';
-import { 
-  toArabicNumbers, getArabicDate, getArabicTime, playSequentialAudio 
-} from '@/lib/utils'; 
+import { useClinics, useSettings, useDoctors, useQueue } from '@/lib/hooks'; 
+import { supabase } from '@/lib/supabase'; // للـ Realtime المخصص للطوارئ
+import { Lock, LogOut, Maximize, Minimize, Volume2, VolumeX, Bell, Activity, Ban, Clock, User, ZoomIn, ZoomOut, AlertTriangle } from 'lucide-react';
+import { toArabicNumbers, getArabicDate, getArabicTime, playSequentialAudio, playAudio } from '@/lib/utils'; 
 
 export default function DisplayScreen() {
   const router = useRouter();
-  
-  // Hooks
   const { clinics, loading: clinicsLoading } = useClinics();
   const { doctors } = useDoctors(); 
   const { settings } = useSettings();
 
-  // States
   const [isClient, setIsClient] = useState(false);
   const [selectedScreen, setSelectedScreen] = useState(1);
   const [password, setPassword] = useState('');
@@ -27,33 +20,27 @@ export default function DisplayScreen() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
-  
-  // حالة التكبير (Zoom)
   const [isZoomed, setIsZoomed] = useState(false);
-  
-  // Doctor Rotator State
   const [currentDoctorIndex, setCurrentDoctorIndex] = useState(0);
-
-  // Notification State
-  const [notification, setNotification] = useState<{ show: boolean; message: string; subtext: string } | null>(null);
   
-  // Ref for tracking changes
+  // Notification State
+  const [notification, setNotification] = useState<{ 
+    show: boolean; 
+    message: string; 
+    subtext: string; 
+    type: 'normal' | 'emergency';
+  } | null>(null);
+  
   const prevClinicsRef = useRef<typeof clinics>([]);
-  // لتجنب التنبيه عند التحميل الأول للصفحة
   const isFirstLoad = useRef(true);
 
-  // Initialization
-  useEffect(() => {
-    setIsClient(true);
-  }, []);
+  useEffect(() => { setIsClient(true); }, []);
 
-  // Clock Timer
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
 
-  // Doctor Rotator Timer (Every 10 Seconds)
   useEffect(() => {
     if (doctors.length > 0) {
       const doctorTimer = setInterval(() => {
@@ -63,11 +50,49 @@ export default function DisplayScreen() {
     }
   }, [doctors]);
 
-  // Realtime Updates & Notifications Logic
+  // --- Realtime Logic ---
+
+  // 1. الاستماع للطوارئ من جدول queue
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    const queueChannel = supabase.channel('emergency-queue')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'queue', filter: 'is_emergency=eq.true' },
+        (payload) => {
+          // عند وصول حالة طوارئ جديدة
+          const clinicName = clinics.find(c => c.id === payload.new.clinic_id)?.clinic_name || 'العيادة';
+          triggerEmergency(clinicName);
+        }
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(queueChannel); };
+  }, [isAuthenticated, clinics]);
+
+  const triggerEmergency = async (clinicName: string) => {
+    setNotification({
+      show: true,
+      message: '⚠️ حالة طوارئ ⚠️',
+      subtext: `يرجى إخلاء الطريق لـ ${clinicName}`,
+      type: 'emergency'
+    });
+
+    if (!isMuted) {
+      try {
+        await playAudio('/audio/emergency.mp3');
+      } catch (e) { console.error(e); }
+    }
+
+    // إخفاء التنبيه بعد 15 ثانية
+    setTimeout(() => setNotification(null), 15000);
+  };
+
+  // 2. الاستماع للنداءات العادية
   useEffect(() => {
     if (!isAuthenticated || clinicsLoading) return;
 
-    // إذا كان هذا أول تحميل للبيانات، نقوم فقط بتخزين الحالة ونتجاوز التنبيه
     if (isFirstLoad.current && clinics.length > 0) {
       prevClinicsRef.current = clinics;
       isFirstLoad.current = false;
@@ -77,9 +102,11 @@ export default function DisplayScreen() {
     clinics.forEach((clinic) => {
       const prevClinic = prevClinicsRef.current.find((c) => c.id === clinic.id);
       
-      // نتحقق فقط من تغير وقت النداء (بغض النظر عن التوقيت الفعلي لتجنب مشاكل المناطق الزمنية)
       if (prevClinic && clinic.last_call_time !== prevClinic.last_call_time && clinic.last_call_time) {
-          triggerAlert(clinic);
+          // تشغيل التنبيه العادي فقط إذا لم يكن هناك طوارئ حالياً
+          if (notification?.type !== 'emergency') {
+            triggerAlert(clinic);
+          }
       }
     });
 
@@ -87,31 +114,24 @@ export default function DisplayScreen() {
   }, [clinics, isAuthenticated, isMuted, clinicsLoading]);
 
   const triggerAlert = async (clinic: any) => {
-    // 1. Show Visual Notification
     setNotification({
       show: true,
       message: `العميل رقم ${toArabicNumbers(clinic.current_number)}`,
-      subtext: `يرجى التوجه إلى ${clinic.clinic_name}`
+      subtext: `يرجى التوجه إلى ${clinic.clinic_name}`,
+      type: 'normal'
     });
 
-    // إخفاء التنبيه بعد 10 ثواني
-    setTimeout(() => {
-      setNotification(null);
-    }, 10000);
+    setTimeout(() => setNotification(null), 10000);
 
-    // 2. Play Audio
     if (!isMuted) {
       const audioFiles = [
         '/audio/ding.mp3',
-        `/audio/${clinic.current_number}.mp3`, // تأكد أن ملفات الأرقام موجودة
-        `/audio/clinic${clinic.clinic_number}.mp3` // تأكد أن ملفات العيادات موجودة
+        `/audio/${clinic.current_number}.mp3`,
+        `/audio/clinic${clinic.clinic_number}.mp3`
       ];
-
       try {
         await playSequentialAudio(audioFiles);
-      } catch (error) {
-        console.error("Audio playback error:", error);
-      }
+      } catch (error) { console.error("Audio error:", error); }
     }
   };
 
@@ -142,7 +162,6 @@ export default function DisplayScreen() {
     router.push('/');
   };
 
-  // Loading Screen
   if (!isClient || clinicsLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-blue-600 to-purple-600">
@@ -154,7 +173,6 @@ export default function DisplayScreen() {
     );
   }
 
-  // Login Screen
   if (!isAuthenticated) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-900 to-slate-900 flex items-center justify-center p-4">
@@ -182,23 +200,26 @@ export default function DisplayScreen() {
     );
   }
 
-  // Filter clinics for current screen
   const screenClinics = clinics.filter((c) => c.screen_id === clinics[selectedScreen - 1]?.screen_id);
   const currentDoctor = doctors[currentDoctorIndex % doctors.length];
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white overflow-hidden relative flex flex-col font-cairo">
+    <div className={`min-h-screen bg-gray-900 text-white overflow-hidden relative flex flex-col font-cairo ${notification?.type === 'emergency' ? 'animate-pulse' : ''}`}>
       
       {/* === Notification Slider === */}
       <div className={`fixed top-0 left-0 w-full z-50 transform transition-transform duration-500 ease-out ${notification ? 'translate-y-0' : '-translate-y-full'}`}>
-        <div className="bg-gradient-to-r from-amber-500 to-orange-600 shadow-2xl border-b-4 border-white p-6 flex justify-between items-center">
+        <div className={`shadow-2xl border-b-4 border-white p-6 flex justify-between items-center ${
+          notification?.type === 'emergency' 
+            ? 'bg-gradient-to-r from-red-600 to-red-800' 
+            : 'bg-gradient-to-r from-amber-500 to-orange-600'
+        }`}>
           <div className="flex items-center gap-6">
             <div className="bg-white p-3 rounded-full animate-bounce">
-               <Bell className="w-10 h-10 text-orange-600" />
+               {notification?.type === 'emergency' ? <AlertTriangle className="w-10 h-10 text-red-600" /> : <Bell className="w-10 h-10 text-orange-600" />}
             </div>
             <div>
               <h2 className="text-4xl font-black text-white drop-shadow-md mb-1">{notification?.message}</h2>
-              <p className="text-2xl text-amber-100 font-semibold">{notification?.subtext}</p>
+              <p className="text-2xl text-white/90 font-semibold">{notification?.subtext}</p>
             </div>
           </div>
         </div>
@@ -229,7 +250,6 @@ export default function DisplayScreen() {
             ))}
           </select>
           <div className="flex bg-slate-700 rounded-lg p-1 gap-1">
-             {/* زر التكبير/التصغير */}
              <button 
                onClick={() => setIsZoomed(!isZoomed)} 
                className={`p-2 rounded transition-colors ${isZoomed ? 'bg-blue-600 text-white' : 'hover:bg-slate-600'}`}
@@ -254,7 +274,7 @@ export default function DisplayScreen() {
       {/* === Main Layout === */}
       <div className="flex-1 flex overflow-hidden">
         
-        {/* --- Left Column: Clinics List (Dynamic Width) --- */}
+        {/* --- Left Column: Clinics List --- */}
         <div className={`${isZoomed ? 'w-2/3' : 'w-1/3'} bg-slate-100/5 backdrop-blur-sm border-l border-slate-700 p-4 flex flex-col gap-4 overflow-y-auto custom-scrollbar transition-all duration-300 ease-in-out`}>
           {screenClinics.length === 0 ? (
             <div className="flex-1 flex items-center justify-center text-slate-500">
@@ -272,11 +292,8 @@ export default function DisplayScreen() {
                   }
                 `}
               >
-                {/* Active Indicator Strip */}
                 <div className={`absolute right-0 top-0 bottom-0 w-2 ${clinic.is_active ? 'bg-blue-600' : 'bg-slate-400'}`}></div>
-                
                 <div className="p-5 pr-7">
-                  {/* Top Line: Name & Number */}
                   <div className="flex justify-between items-center mb-3">
                     <h3 className={`font-bold ${isZoomed ? 'text-4xl' : 'text-2xl'} ${clinic.is_active ? 'text-slate-800' : 'text-slate-600'} transition-all`}>
                       {clinic.clinic_name}
@@ -285,8 +302,6 @@ export default function DisplayScreen() {
                       {toArabicNumbers(clinic.current_number)}
                     </span>
                   </div>
-                  
-                  {/* Bottom Line: Time & Status */}
                   <div className="flex justify-between items-center border-t border-slate-100 pt-3">
                     <div className="flex items-center gap-2">
                        {clinic.is_active ? (
@@ -299,7 +314,6 @@ export default function DisplayScreen() {
                          </span>
                        )}
                     </div>
-                    
                     <div className="flex items-center gap-1 text-slate-400 text-sm">
                        <Clock className="w-4 h-4" />
                        <span>
@@ -315,14 +329,9 @@ export default function DisplayScreen() {
           )}
         </div>
 
-        {/* --- Right Column: Video & Doctor (Dynamic Width) --- */}
+        {/* --- Right Column: Video & Doctor --- */}
         <div className={`${isZoomed ? 'w-1/3' : 'w-2/3'} flex flex-col bg-black transition-all duration-300 ease-in-out`}>
-          
-          {/* Top: Educational Video (Flex Grow) */}
           <div className="flex-1 relative bg-black flex items-center justify-center overflow-hidden group">
-            <div className="absolute inset-0 bg-gradient-to-b from-transparent to-black/60 z-10 pointer-events-none"></div>
-            
-            {/* Placeholder for Video Player */}
             <div className="text-center z-0 opacity-50">
                <div className="w-24 h-24 rounded-full border-4 border-slate-700 flex items-center justify-center mx-auto mb-4">
                  <div className="w-0 h-0 border-t-[15px] border-t-transparent border-l-[30px] border-l-slate-600 border-b-[15px] border-b-transparent ml-2"></div>
@@ -331,18 +340,14 @@ export default function DisplayScreen() {
             </div>
           </div>
 
-          {/* Bottom: Doctor Rotator (Fixed Height) */}
           <div className="h-48 bg-gradient-to-r from-slate-900 to-slate-800 border-t border-slate-700 relative overflow-hidden">
              {doctors.length > 0 && currentDoctor ? (
                <div key={currentDoctor.id} className="h-full flex items-center p-6 animate-slide-in-bottom">
-                 {/* Doctor Image */}
                  <div className="w-32 h-32 rounded-full border-4 border-blue-500 overflow-hidden shadow-2xl flex-shrink-0 bg-white">
                    <div className="w-full h-full bg-slate-200 flex items-center justify-center text-slate-400">
                      <User className="w-16 h-16" />
                    </div>
                  </div>
-                 
-                 {/* Doctor Info */}
                  <div className="mr-6 flex-1">
                     <div className="flex items-center gap-3 mb-2">
                        <span className="bg-blue-600 text-white text-xs px-2 py-1 rounded">الطبيب المناوب</span>
@@ -363,7 +368,7 @@ export default function DisplayScreen() {
         </div>
       </div>
 
-      {/* === Footer: News Ticker === */}
+      {/* === Footer === */}
       <div className="h-14 bg-blue-900 border-t border-blue-700 flex items-center relative overflow-hidden shadow-lg z-50">
          <div className="bg-blue-800 h-full px-6 flex items-center z-10 shadow-lg">
             <span className="text-white font-bold whitespace-nowrap">شريط الأخبار</span>
@@ -373,7 +378,6 @@ export default function DisplayScreen() {
          </div>
       </div>
       
-      {/* Custom Styles for Animation */}
       <style jsx global>{`
         @keyframes slideInBottom {
           from { transform: translateY(20px); opacity: 0; }
@@ -382,16 +386,9 @@ export default function DisplayScreen() {
         .animate-slide-in-bottom {
           animation: slideInBottom 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
         }
-        .custom-scrollbar::-webkit-scrollbar {
-          width: 6px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-track {
-          background: rgba(0,0,0,0.1);
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb {
-          background: rgba(255,255,255,0.1);
-          border-radius: 10px;
-        }
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: rgba(0,0,0,0.1); }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
       `}</style>
     </div>
   );
