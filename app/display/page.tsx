@@ -29,7 +29,7 @@ export default function DisplayScreen() {
     show: boolean; 
     message: string; 
     type: 'normal' | 'emergency' | 'transfer';
-    targetClinicId?: string; // لتحديد العيادة التي ستومض
+    targetClinicId?: string;
   } | null>(null);
   
   const prevClinicsRef = useRef<typeof clinics>([]);
@@ -56,7 +56,6 @@ export default function DisplayScreen() {
   useEffect(() => {
     if (!isAuthenticated) return;
 
-    // A. قناة الطوارئ
     const queueChannel = supabase.channel('display-queue')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'queue', filter: 'is_emergency=eq.true' },
         (payload) => {
@@ -66,7 +65,6 @@ export default function DisplayScreen() {
       )
       .subscribe();
 
-    // B. قناة التحويلات
     const alertChannel = supabase.channel('control-alerts')
       .on('broadcast', { event: 'clinic-transfer' }, (payload) => {
         triggerTransferAlert(payload.payload);
@@ -183,112 +181,135 @@ export default function DisplayScreen() {
   return (
     <div className={`min-h-screen bg-gray-900 text-white overflow-hidden relative flex flex-col font-cairo ${notification?.type === 'emergency' ? 'animate-pulse' : ''}`}>
       
-      {/* === Notification Slider (Updated: Bigger, Single Line) === */}
+      {/* === Notification Slider (Updated Font Size) === */}
       <div className={`fixed top-0 left-0 w-full z-50 transform transition-transform duration-500 ease-out ${notification ? 'translate-y-0' : '-translate-y-full'}`}>
-        <div className={`shadow-2xl border-b-8 border-white p-8 flex justify-center items-center h-40 ${
+        <div className={`shadow-2xl border-b-8 border-white p-6 flex justify-center items-center h-32 ${
           notification?.type === 'emergency' ? 'bg-red-700' : 
           notification?.type === 'transfer' ? 'bg-indigo-700' :
           'bg-gradient-to-r from-amber-500 to-orange-600'
         }`}>
-          <div className="flex items-center gap-8 w-full max-w-7xl justify-center">
-            <div className="bg-white p-4 rounded-full animate-bounce shrink-0">
-               {notification?.type === 'emergency' ? <AlertTriangle className="w-16 h-16 text-red-600" /> : 
-                notification?.type === 'transfer' ? <ArrowRightLeft className="w-16 h-16 text-indigo-600" /> :
-                <Bell className="w-16 h-16 text-orange-600" />}
+          <div className="flex items-center gap-6 w-full max-w-7xl justify-center">
+            <div className="bg-white p-3 rounded-full animate-bounce shrink-0">
+               {notification?.type === 'emergency' ? <AlertTriangle className="w-12 h-12 text-red-600" /> : 
+                notification?.type === 'transfer' ? <ArrowRightLeft className="w-12 h-12 text-indigo-600" /> :
+                <Bell className="w-12 h-12 text-orange-600" />}
             </div>
-            <h2 className="text-6xl md:text-7xl font-black text-white drop-shadow-lg whitespace-nowrap overflow-hidden text-ellipsis leading-tight">
+            {/* تم تصغير الخط قليلاً من 7xl إلى 5xl/6xl */}
+            <h2 className="text-4xl md:text-5xl lg:text-6xl font-black text-white drop-shadow-lg whitespace-nowrap overflow-hidden text-ellipsis leading-tight">
               {notification?.message}
             </h2>
           </div>
         </div>
       </div>
 
-      {/* Top Bar */}
-      <div className="h-20 bg-gradient-to-l from-slate-800 to-slate-900 border-b border-slate-700 flex items-center justify-between px-6 shadow-md z-40">
-        <div className="flex items-center gap-6">
-          <h1 className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-cyan-300">{settings?.center_name}</h1>
-          <div className="flex items-center gap-4 text-slate-300 text-lg font-mono">
-            <span className="flex items-center gap-2"><Clock className="w-5 h-5 text-blue-400"/> {getArabicTime(currentTime)}</span>
-            <span>|</span>
+      {/* === Top Bar (Updated Fonts) === */}
+      <div className="h-24 bg-gradient-to-l from-slate-800 to-slate-900 border-b border-slate-700 flex items-center justify-between px-8 shadow-md z-40">
+        <div className="flex items-center gap-8">
+          <h1 className="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-cyan-300 drop-shadow-md">
+            {settings?.center_name || 'المركز الطبي'}
+          </h1>
+          <div className="h-10 w-[2px] bg-slate-600"></div>
+          <div className="flex items-center gap-6 text-slate-200 text-2xl font-mono tracking-wide">
+            <span className="flex items-center gap-3"><Clock className="w-7 h-7 text-blue-400"/> {getArabicTime(currentTime)}</span>
+            <span className="text-slate-500">|</span>
             <span>{getArabicDate(currentTime)}</span>
           </div>
         </div>
+
         <div className="flex items-center gap-3">
-          <select value={selectedScreen} onChange={(e) => setSelectedScreen(parseInt(e.target.value))} className="px-4 py-2 bg-slate-700 text-white rounded-lg border border-slate-600">
+          <select value={selectedScreen} onChange={(e) => setSelectedScreen(parseInt(e.target.value))} className="px-4 py-2 bg-slate-700 text-white rounded-lg border border-slate-600 font-bold">
             {[1, 2, 3, 4, 5].map((num) => <option key={num} value={num}>شاشة {toArabicNumbers(num)}</option>)}
           </select>
           <div className="flex bg-slate-700 rounded-lg p-1 gap-1">
-             <button onClick={() => setIsZoomed(!isZoomed)} className={`p-2 rounded ${isZoomed ? 'bg-blue-600' : 'hover:bg-slate-600'}`}><ZoomIn className="w-5 h-5"/></button>
-             <button onClick={handleFullscreen} className="p-2 hover:bg-slate-600 rounded"><Maximize className="w-5 h-5"/></button>
-             <button onClick={() => setIsMuted(!isMuted)} className="p-2 hover:bg-slate-600 rounded">{isMuted ? <VolumeX className="w-5 h-5 text-red-400"/> : <Volume2 className="w-5 h-5"/>}</button>
-             <button onClick={() => { setIsAuthenticated(false); router.push('/'); }} className="p-2 hover:bg-red-900/50 text-red-400 rounded"><LogOut className="w-5 h-5"/></button>
+             <button onClick={() => setIsZoomed(!isZoomed)} className={`p-3 rounded transition-colors ${isZoomed ? 'bg-blue-600 text-white' : 'hover:bg-slate-600'}`} title={isZoomed ? "تصغير القائمة" : "تكبير القائمة"}>
+               {isZoomed ? <ZoomOut className="w-6 h-6"/> : <ZoomIn className="w-6 h-6"/>}
+             </button>
+             <button onClick={handleFullscreen} className="p-3 hover:bg-slate-600 rounded transition-colors"><Maximize className="w-6 h-6"/></button>
+             <button onClick={() => setIsMuted(!isMuted)} className="p-3 hover:bg-slate-600 rounded transition-colors">{isMuted ? <VolumeX className="w-6 h-6 text-red-400"/> : <Volume2 className="w-6 h-6"/>}</button>
+             <button onClick={() => { setIsAuthenticated(false); router.push('/'); }} className="p-3 hover:bg-red-900/50 text-red-400 rounded transition-colors"><LogOut className="w-6 h-6"/></button>
           </div>
         </div>
       </div>
 
-      {/* Main Layout */}
+      {/* === Main Layout (Updated: Doctors moved to left) === */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Clinics List */}
-        <div className={`${isZoomed ? 'w-2/3' : 'w-1/3'} bg-slate-100/5 backdrop-blur-sm border-l border-slate-700 p-4 flex flex-col gap-4 overflow-y-auto custom-scrollbar transition-all duration-300`}>
-          {screenClinics.map((clinic) => (
-            <div key={clinic.id} className={`
-                relative overflow-hidden rounded-xl border transition-all duration-300 shadow-lg
-                ${notification?.targetClinicId === clinic.id ? 'animate-flash z-10 scale-105' : ''} 
-                ${clinic.is_active ? 'bg-white border-blue-100' : 'bg-slate-200 border-slate-300 opacity-60 grayscale'}
-              `}>
-              <div className={`absolute right-0 top-0 bottom-0 w-2 ${clinic.is_active ? 'bg-blue-600' : 'bg-slate-400'}`}></div>
-              <div className="p-5 pr-7">
-                <div className="flex justify-between items-center mb-3">
-                  <h3 className={`font-bold ${isZoomed ? 'text-4xl' : 'text-2xl'} ${clinic.is_active ? 'text-slate-800' : 'text-slate-600'}`}>{clinic.clinic_name}</h3>
-                  <span className={`font-black ${isZoomed ? 'text-8xl' : 'text-6xl'} ${clinic.is_active ? 'text-blue-600' : 'text-slate-500'}`}>{toArabicNumbers(clinic.current_number)}</span>
-                </div>
-                <div className="flex justify-between items-center border-t border-slate-100 pt-3">
-                  <div className="flex items-center gap-2">
-                     {clinic.is_active ? <span className="flex items-center gap-1 text-green-600 bg-green-50 px-2 py-1 rounded-md text-sm font-bold"><Activity className="w-4 h-4" /> نشطة</span> : <span className="flex items-center gap-1 text-slate-500 bg-slate-100 px-2 py-1 rounded-md text-sm font-bold"><Ban className="w-4 h-4" /> متوقفة</span>}
+        
+        {/* --- Left Column: Clinics & Doctors (Dynamic Width) --- */}
+        <div className={`${isZoomed ? 'w-1/2' : 'w-1/3'} flex flex-col border-l border-slate-700 transition-all duration-500 ease-in-out`}>
+          
+          {/* A. Clinics List (Scrollable) */}
+          <div className="flex-1 bg-slate-100/5 backdrop-blur-sm p-4 flex flex-col gap-4 overflow-y-auto custom-scrollbar">
+            {screenClinics.map((clinic) => (
+              <div key={clinic.id} className={`
+                  relative overflow-hidden rounded-xl border transition-all duration-300 shadow-lg
+                  ${notification?.targetClinicId === clinic.id ? 'animate-flash z-10 scale-105' : ''} 
+                  ${clinic.is_active ? 'bg-white border-blue-100' : 'bg-slate-200 border-slate-300 opacity-60 grayscale'}
+                `}>
+                <div className={`absolute right-0 top-0 bottom-0 w-3 ${clinic.is_active ? 'bg-blue-600' : 'bg-slate-400'}`}></div>
+                <div className="p-5 pr-8">
+                  <div className="flex justify-between items-center mb-2">
+                    <h3 className={`font-bold ${isZoomed ? 'text-4xl' : 'text-3xl'} ${clinic.is_active ? 'text-slate-800' : 'text-slate-600'}`}>{clinic.clinic_name}</h3>
+                    <span className={`font-black ${isZoomed ? 'text-8xl' : 'text-7xl'} ${clinic.is_active ? 'text-blue-600' : 'text-slate-500'}`}>{toArabicNumbers(clinic.current_number)}</span>
                   </div>
-                  <div className="flex items-center gap-1 text-slate-400 text-sm">
-                     <Clock className="w-4 h-4" />
-                     <span>{clinic.last_call_time ? new Date(clinic.last_call_time).toLocaleTimeString('ar-EG', {hour: '2-digit', minute:'2-digit'}) : '--:--'}</span>
+                  <div className="flex justify-between items-center border-t border-slate-100 pt-3">
+                    <div className="flex items-center gap-2">
+                       {clinic.is_active ? <span className="flex items-center gap-1 text-green-600 bg-green-50 px-2 py-1 rounded-md text-sm font-bold"><Activity className="w-4 h-4" /> نشطة</span> : <span className="flex items-center gap-1 text-slate-500 bg-slate-100 px-2 py-1 rounded-md text-sm font-bold"><Ban className="w-4 h-4" /> متوقفة</span>}
+                    </div>
+                    <div className="flex items-center gap-1 text-slate-400 font-mono text-lg">
+                       <Clock className="w-5 h-5" />
+                       <span>{clinic.last_call_time ? new Date(clinic.last_call_time).toLocaleTimeString('ar-EG', {hour: '2-digit', minute:'2-digit'}) : '--:--'}</span>
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
-          ))}
-        </div>
-
-        {/* Video & Doctor */}
-        <div className={`${isZoomed ? 'w-1/3' : 'w-2/3'} flex flex-col bg-black transition-all duration-300`}>
-          <div className="flex-1 relative bg-black flex items-center justify-center overflow-hidden">
-            <div className="text-center z-0 opacity-50">
-               <div className="w-24 h-24 rounded-full border-4 border-slate-700 flex items-center justify-center mx-auto mb-4"><div className="w-0 h-0 border-t-[15px] border-t-transparent border-l-[30px] border-l-slate-600 border-b-[15px] border-b-transparent ml-2"></div></div>
-               <p className="text-slate-500 text-xl">فيديو توعوي</p>
-            </div>
+            ))}
           </div>
-          
-          {/* Doctor Card (Sliding Right to Left) */}
-          <div className="h-48 bg-gradient-to-r from-slate-900 to-slate-800 border-t border-slate-700 relative overflow-hidden">
+
+          {/* B. Doctor Rotator (Moved Here - Fixed Height) */}
+          <div className="h-48 bg-gradient-to-r from-slate-900 to-slate-800 border-t-4 border-slate-700 relative overflow-hidden shrink-0">
              {doctors.length > 0 && currentDoctor ? (
                <div key={currentDoctor.id} className="h-full flex items-center p-6 animate-slide-in-right">
-                 <div className="w-32 h-32 rounded-full border-4 border-blue-500 overflow-hidden shadow-2xl flex-shrink-0 bg-white flex items-center justify-center text-slate-400"><User className="w-16 h-16" /></div>
-                 <div className="mr-6 flex-1">
-                    <div className="flex items-center gap-3 mb-2"><span className="bg-blue-600 text-white text-xs px-2 py-1 rounded">الطبيب المناوب</span></div>
-                    <h2 className="text-2xl font-bold text-white mb-1">{currentDoctor.full_name}</h2>
-                    <p className="text-lg text-blue-300 flex items-center gap-2"><Activity className="w-4 h-4"/>{currentDoctor.specialization}</p>
+                 <div className="w-32 h-32 rounded-full border-4 border-blue-500 overflow-hidden shadow-2xl flex-shrink-0 bg-white flex items-center justify-center text-slate-400 relative z-10">
+                    <User className="w-16 h-16" />
                  </div>
+                 <div className="mr-6 flex-1 relative z-10">
+                    <div className="flex items-center gap-3 mb-2"><span className="bg-blue-600 text-white text-sm px-3 py-1 rounded-full shadow-sm">الطبيب المناوب</span></div>
+                    <h2 className="text-3xl font-bold text-white mb-1 drop-shadow-md">{currentDoctor.full_name}</h2>
+                    <p className="text-xl text-blue-300 flex items-center gap-2"><Activity className="w-5 h-5"/>{currentDoctor.specialization}</p>
+                 </div>
+                 {/* Decorative Icon */}
+                 <User className="absolute -left-6 -bottom-6 w-48 h-48 text-white/5 rotate-12 z-0" />
                </div>
              ) : <div className="h-full flex items-center justify-center text-slate-500"><p>جاري تحميل بيانات الأطباء...</p></div>}
           </div>
+
         </div>
+
+        {/* --- Right Column: Video Only (Dynamic Width) --- */}
+        <div className={`${isZoomed ? 'w-1/2' : 'w-2/3'} bg-black transition-all duration-500 ease-in-out relative border-r border-slate-800`}>
+          <div className="w-full h-full">
+            <iframe 
+              width="100%" 
+              height="100%" 
+              src="https://www.youtube.com/embed/videoseries?list=PLDQLuvEh-UTIqyEyZzAKPBwJ0iiZrQzsF&autoplay=1&loop=1&mute=1" 
+              title="Medical Awareness" 
+              frameBorder="0" 
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
+              allowFullScreen
+              className="pointer-events-none"
+            ></iframe>
+          </div>
+        </div>
+
       </div>
 
       {/* Footer */}
-      <div className="h-14 bg-blue-900 border-t border-blue-700 flex items-center relative overflow-hidden shadow-lg z-50">
-         <div className="bg-blue-800 h-full px-6 flex items-center z-10 shadow-lg"><span className="text-white font-bold whitespace-nowrap">شريط الأخبار</span></div>
-         <div className="absolute whitespace-nowrap animate-slide-left text-white text-xl font-medium px-4 w-full" style={{ animationDuration: `${settings?.news_ticker_speed || 30}s` }}>{settings?.news_ticker_content}</div>
+      <div className="h-16 bg-blue-900 border-t border-blue-700 flex items-center relative overflow-hidden shadow-lg z-50">
+         <div className="bg-blue-800 h-full px-8 flex items-center z-10 shadow-2xl skew-x-12 -ml-6"><span className="text-white font-bold whitespace-nowrap text-xl -skew-x-12">شريط الأخبار</span></div>
+         <div className="absolute whitespace-nowrap animate-slide-left text-white text-2xl font-medium px-4 w-full pt-1" style={{ animationDuration: `${settings?.news_ticker_speed || 30}s` }}>{settings?.news_ticker_content}</div>
       </div>
       
       <style jsx global>{`
-        /* Animation: Slide In Right (Right to Left) */
         @keyframes slideInRight {
           from { transform: translateX(100%); opacity: 0; }
           to { transform: translateX(0); opacity: 1; }
@@ -296,19 +317,16 @@ export default function DisplayScreen() {
         .animate-slide-in-right {
           animation: slideInRight 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
         }
-
-        /* Animation: Flash */
         @keyframes flash {
-          0%, 100% { opacity: 1; transform: scale(1.02); border-color: #2563eb; box-shadow: 0 0 15px rgba(37, 99, 235, 0.5); }
-          50% { opacity: 0.8; transform: scale(1.05); border-color: #facc15; box-shadow: 0 0 25px rgba(250, 204, 21, 0.8); background-color: #fefce8; }
+          0%, 100% { transform: scale(1); border-color: #2563eb; }
+          50% { transform: scale(1.03); border-color: #facc15; box-shadow: 0 0 30px rgba(250, 204, 21, 0.6); background-color: #fffbeb; }
         }
         .animate-flash {
-          animation: flash 1s infinite;
+          animation: flash 1.5s infinite;
         }
-
-        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: rgba(0,0,0,0.1); }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
+        .custom-scrollbar::-webkit-scrollbar { width: 8px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: rgba(0,0,0,0.2); }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 10px; }
       `}</style>
     </div>
   );
