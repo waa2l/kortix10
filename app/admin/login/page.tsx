@@ -26,8 +26,11 @@ export default function AdminLogin() {
 
       if (authError) throw authError;
 
-      // Store admin session
-      localStorage.setItem('adminSession', JSON.stringify(data.session));
+// حفظ في localStorage للاستخدام في الواجهة الأمامية
+localStorage.setItem('adminSession', JSON.stringify(data.session));
+
+// حفظ في Cookies لكي يراها الـ Middleware
+document.cookie = `adminSession=true; path=/; max-age=${60 * 60 * 24}; SameSite=Lax`;
       router.push('/admin/dashboard');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'خطأ في تسجيل الدخول');
