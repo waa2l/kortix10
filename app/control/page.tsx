@@ -4,8 +4,8 @@ import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useClinics, useQueue } from '@/lib/hooks';
 import { supabase } from '@/lib/supabase';
-import { Lock, LogOut, Play, RotateCcw, AlertTriangle, Send, Pause, Bell, MessageSquare, X, ArrowRightLeft } from 'lucide-react';
-import { toArabicNumbers, playSequentialAudio } from '@/lib/utils';
+import { Lock, LogOut, Play, RotateCcw, AlertTriangle, Send, Pause, Bell, MessageSquare, X, ArrowRightLeft, Clock } from 'lucide-react';
+import { toArabicNumbers, playSequentialAudio, getArabicDate, getArabicTime } from '@/lib/utils';
 
 export default function ControlPanel() {
   const router = useRouter();
@@ -20,8 +20,9 @@ export default function ControlPanel() {
   const [password, setPassword] = useState('');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [error, setError] = useState('');
+  const [currentTime, setCurrentTime] = useState(new Date());
   
-  // Notification State
+  // Notification State (Updated: 3 Seconds)
   const [notification, setNotification] = useState<{ show: boolean; message: string; type?: 'normal' | 'emergency' | 'message' | 'transfer' } | null>(null);
   
   // Inputs State
@@ -43,21 +44,24 @@ export default function ControlPanel() {
     setIsClient(true);
   }, []);
 
+  // Time Updater
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
   // --- Realtime Logic (Listening) ---
 
-  // 1. مراقبة تحديثات العيادات (للأزرار والنداءات العادية والخاصة)
   useEffect(() => {
     if (!isAuthenticated || clinicsLoading) return;
 
     clinics.forEach((clinic) => {
       const prevClinic = prevClinicsRef.current.find((c) => c.id === clinic.id);
       
-      // الكشف عن نداء جديد (تغير وقت النداء)
       if (prevClinic && clinic.last_call_time !== prevClinic.last_call_time && clinic.last_call_time) {
         const callTime = new Date(clinic.last_call_time).getTime();
         const now = new Date().getTime();
         
-        // إذا كان النداء حديثاً (أقل من 5 ثواني)
         if (now - callTime < 5000) {
           triggerControlAlert(
             `تم نداء رقم ${toArabicNumbers(clinic.current_number)} - ${clinic.clinic_name}`,
@@ -71,7 +75,6 @@ export default function ControlPanel() {
     prevClinicsRef.current = clinics;
   }, [clinics, isAuthenticated]);
 
-  // 2. مراقبة رسائل التنبيه والتحويل (Broadcast)
   useEffect(() => {
     if (!isAuthenticated) return;
 
@@ -88,12 +91,11 @@ export default function ControlPanel() {
         }
       })
       .on('broadcast', { event: 'clinic-transfer' }, (payload) => {
-        // إذا كنت أنا العيادة المحول منها أو إليها، اعرض تنبيه
         if (payload.payload.fromClinicId === selectedClinic || payload.payload.toClinicId === selectedClinic) {
            triggerControlAlert(
             `تحويل العميل ${toArabicNumbers(payload.payload.ticketNumber)} إلى ${payload.payload.toClinicName}`,
             'transfer',
-            ['/audio/ding.mp3', `/audio/${payload.payload.ticketNumber}.mp3`, `/audio/clinic${payload.payload.toClinicNumber}.mp3`]
+            ['/audio/ding.mp3']
           );
         }
       })
@@ -105,10 +107,10 @@ export default function ControlPanel() {
   }, [selectedClinic, isAuthenticated]);
 
 
-  // دالة التنبيه الموحدة
+  // دالة التنبيه الموحدة (تم تعديل الوقت لـ 3 ثواني)
   const triggerControlAlert = async (message: string, type: 'normal' | 'emergency' | 'message' | 'transfer' = 'normal', audioFiles: string[] = []) => {
     setNotification({ show: true, message, type });
-    setTimeout(() => setNotification(null), 8000);
+    setTimeout(() => setNotification(null), 3000); // 3 Seconds
 
     if (audioFiles.length > 0) {
       try {
@@ -117,7 +119,7 @@ export default function ControlPanel() {
     }
   };
 
-  // --- Handlers ---
+  // --- Handlers (With Feedback) ---
 
   const handleNextPatient = async () => {
     const clinic = clinics.find((c) => c.id === selectedClinic);
@@ -127,9 +129,10 @@ export default function ControlPanel() {
           current_number: clinic.current_number + 1,
           last_call_time: new Date().toISOString()
         });
-      } catch (err) { alert('فشل التحديث'); }
+        // Feedback handled by realtime listener
+      } catch (err) { triggerControlAlert('فشل التحديث', 'normal', ['/audio/ding.mp3']); }
     } else {
-      alert('العيادة متوقفة حالياً');
+      triggerControlAlert('العيادة متوقفة حالياً', 'normal', ['/audio/ding.mp3']);
     }
   };
 
@@ -140,7 +143,7 @@ export default function ControlPanel() {
         await updateClinic(clinic.id, { 
           current_number: clinic.current_number - 1 
         });
-        // لا نقوم بتحديث الوقت هنا حتى لا يتم النداء، فقط تغيير الرقم
+        triggerControlAlert('تم الرجوع للعميل السابق', 'normal', ['/audio/ding.mp3']);
       } catch (err) { alert('فشل التحديث'); }
     }
   };
@@ -150,6 +153,7 @@ export default function ControlPanel() {
     if (clinic && clinic.current_number > 0) {
        try {
           await updateClinic(clinic.id, { last_call_time: new Date().toISOString() });
+          // Feedback handled by realtime listener
         } catch (err) { alert('فشل التحديث'); }
     }
   };
@@ -159,12 +163,12 @@ export default function ControlPanel() {
     const clinic = clinics.find((c) => c.id === selectedClinic);
     if (clinic) {
       try {
-        // تحديث الرقم والوقت ليتم النداء
         await updateClinic(clinic.id, { 
           current_number: parseInt(specialCallNumber),
           last_call_time: new Date().toISOString()
         });
         setSpecialCallNumber('');
+        // Feedback handled by realtime listener
       } catch (err) { alert('فشل النداء الخاص'); }
     }
   };
@@ -176,7 +180,6 @@ export default function ControlPanel() {
     
     if (currentClinic && targetClinicObj) {
       try {
-        // 1. إرسال إشارة للشاشة (Broadcast)
         const channel = supabase.channel('control-alerts');
         await channel.send({
           type: 'broadcast',
@@ -189,12 +192,9 @@ export default function ControlPanel() {
             toClinicNumber: targetClinicObj.clinic_number
           }
         });
-
-        // 2. (اختياري) إضافة العميل لقائمة انتظار العيادة الأخرى في قاعدة البيانات
-        // await addToQueue({ ... });
-
         setShowTransferModal(false);
         setTransferTargetClinic('');
+        // Feedback handled by realtime listener
       } catch (err) {
         alert('فشل التحويل');
       }
@@ -237,7 +237,7 @@ export default function ControlPanel() {
       });
       setShowMsgModal(false);
       setMsgContent('');
-      alert('تم الإرسال');
+      triggerControlAlert('تم إرسال الرسالة', 'normal', ['/audio/ding.mp3']);
     } catch (err) { alert('فشل الإرسال'); }
   };
 
@@ -246,6 +246,7 @@ export default function ControlPanel() {
       const clinic = clinics.find((c) => c.id === selectedClinic);
       if (clinic) {
         await updateClinic(clinic.id, { current_number: 0, last_call_time: null });
+        triggerControlAlert('تم تصفير العداد', 'normal', ['/audio/ding.mp3']);
       }
     }
   };
@@ -254,6 +255,11 @@ export default function ControlPanel() {
     const clinic = clinics.find((c) => c.id === selectedClinic);
     if (clinic) {
       await updateClinic(clinic.id, { is_active: !clinic.is_active });
+      triggerControlAlert(
+        `تم ${!clinic.is_active ? 'تفعيل' : 'إيقاف'} العيادة`, 
+        'normal', 
+        ['/audio/ding.mp3']
+      );
     }
   };
 
@@ -299,7 +305,33 @@ export default function ControlPanel() {
   return (
     <div className="min-h-screen bg-gray-900 text-white p-6 relative font-cairo overflow-hidden">
       
-      {/* Notification Bar */}
+      {/* Header with Date/Time */}
+      <div className="flex flex-col md:flex-row items-center justify-between mb-8 bg-gray-800 p-4 rounded-xl border border-gray-700">
+        <div className="flex items-center gap-4">
+          <div className="text-right">
+            <h1 className="text-2xl font-bold text-white">{clinic?.clinic_name}</h1>
+            <div className="flex items-center gap-2 text-gray-400 text-sm mt-1">
+              <Clock className="w-4 h-4" />
+              <span>{getArabicTime(currentTime)}</span>
+              <span>-</span>
+              <span>{getArabicDate(currentTime)}</span>
+            </div>
+          </div>
+          {!clinic?.is_active && <span className="bg-red-500 text-xs px-2 py-1 rounded self-start mt-1">متوقفة</span>}
+        </div>
+        
+        <div className="flex items-center gap-6 mt-4 md:mt-0">
+          <div className="text-center bg-gray-700 px-6 py-2 rounded-lg">
+            <p className="text-xs text-gray-400">الرقم الحالي</p>
+            <p className="text-3xl font-bold text-blue-400">{toArabicNumbers(clinic?.current_number || 0)}</p>
+          </div>
+          <button onClick={() => setIsAuthenticated(false)} className="flex items-center gap-2 bg-red-600/20 text-red-400 hover:bg-red-600 hover:text-white px-4 py-2 rounded-lg transition-all text-sm">
+            <LogOut className="w-4 h-4" /> خروج
+          </button>
+        </div>
+      </div>
+
+      {/* Notification Bar (3 Seconds) */}
       <div className={`fixed top-0 left-0 w-full z-50 transform transition-transform duration-300 ${notification ? 'translate-y-0' : '-translate-y-full'}`}>
         <div className={`p-4 shadow-lg flex items-center justify-center gap-3 ${
           notification?.type === 'emergency' ? 'bg-red-600' : 
@@ -309,20 +341,6 @@ export default function ControlPanel() {
           <Bell className="w-6 h-6 text-white animate-bounce" />
           <p className="text-xl font-bold">{notification?.message}</p>
         </div>
-      </div>
-
-      {/* Header */}
-      <div className="flex flex-col md:flex-row items-center justify-between mb-8 bg-gray-800 p-6 rounded-xl border border-gray-700">
-        <div>
-          <h1 className="text-3xl font-bold mb-2 flex items-center gap-3">
-            {clinic?.clinic_name}
-            {!clinic?.is_active && <span className="bg-red-500 text-xs px-2 py-1 rounded">متوقفة</span>}
-          </h1>
-          <p className="text-gray-400 text-lg">الرقم الحالي: <span className="text-blue-400 font-bold text-2xl">{toArabicNumbers(clinic?.current_number || 0)}</span></p>
-        </div>
-        <button onClick={() => setIsAuthenticated(false)} className="mt-4 md:mt-0 flex items-center gap-2 bg-red-600/20 text-red-400 hover:bg-red-600 hover:text-white px-6 py-2 rounded-lg transition-all">
-          <LogOut className="w-5 h-5" /> خروج
-        </button>
       </div>
 
       {/* Grid Buttons */}
@@ -342,7 +360,7 @@ export default function ControlPanel() {
           <span className="text-2xl font-bold">تكرار النداء</span>
         </button>
 
-        {/* زر التحويل الجديد */}
+        {/* Transfer Button */}
         <button onClick={() => setShowTransferModal(true)} disabled={!clinic?.is_active} className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 p-8 rounded-xl flex flex-col items-center gap-3 shadow-lg border-b-4 border-indigo-800 transition-transform active:scale-95">
           <ArrowRightLeft className="w-12 h-12" />
           <span className="text-2xl font-bold">تحويل العميل الحالي</span>
@@ -366,7 +384,6 @@ export default function ControlPanel() {
 
       {/* Extra Tools */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Special Call - Fixed */}
         <div className="bg-gray-800 p-6 rounded-xl border border-gray-700">
           <h3 className="text-xl font-bold mb-4 flex items-center gap-2"><Send className="w-5 h-5 text-blue-400"/> نداء خاص</h3>
           <div className="flex gap-2">
@@ -375,7 +392,7 @@ export default function ControlPanel() {
               value={specialCallNumber}
               onChange={(e) => setSpecialCallNumber(e.target.value)}
               placeholder="رقم العميل" 
-              className="flex-1 bg-gray-700 border-gray-600 rounded-lg px-4 text-white" 
+              className="flex-1 bg-gray-700 border-gray-600 rounded-lg px-4 text-white focus:ring-2 focus:ring-blue-500 outline-none" 
             />
             <button onClick={handleSpecialCall} className="bg-blue-600 hover:bg-blue-700 px-6 py-2 rounded-lg font-bold">نداء</button>
           </div>
