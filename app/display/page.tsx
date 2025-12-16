@@ -10,12 +10,9 @@ import { toArabicNumbers, getArabicDate, getArabicTime, playSequentialAudio, pla
 // --- إعدادات الفيديو المحلي ---
 const SERVER_IP = 'http://192.168.1.48:8080'; 
 const VIDEOS_COUNT = 28; 
+const PATH_PREFIX = ''; // عدلها لـ '/videos' لو احتجت
 
-// هام جداً:
-// إذا كان الرابط الذي عمل معك في الاختبار هو http://.../1.mp4 اترك هذا المتغير فارغاً ''
-// إذا كان الرابط الذي عمل هو http://.../videos/1.mp4 اجعل المتغير '/videos'
-const PATH_PREFIX = ''; // أو '/videos'
-
+// إنشاء القائمة
 const LOCAL_VIDEOS = Array.from({ length: VIDEOS_COUNT }, (_, i) => {
   return `${SERVER_IP}${PATH_PREFIX}/${i + 1}.mp4`;
 });
@@ -23,10 +20,10 @@ const LOCAL_VIDEOS = Array.from({ length: VIDEOS_COUNT }, (_, i) => {
 export default function DisplayScreen() {
   const router = useRouter();
   
+  // ... (نفس الـ Hooks والـ States السابقة) ...
   const { clinics, loading: clinicsLoading } = useClinics();
   const { doctors } = useDoctors(); 
   const { settings } = useSettings();
-
   const [isClient, setIsClient] = useState(false);
   const [selectedScreen, setSelectedScreen] = useState(1);
   const [password, setPassword] = useState('');
@@ -39,7 +36,7 @@ export default function DisplayScreen() {
   
   // Video State
   const [currentVideoIndex, setCurrentVideoIndex] = useState(0);
-  const [videoError, setVideoError] = useState<string | null>(null); // لتشخيص الأخطاء
+  const [videoError, setVideoError] = useState<string | null>(null); 
   const videoRef = useRef<HTMLVideoElement>(null);
 
   // Notification State
@@ -55,6 +52,7 @@ export default function DisplayScreen() {
 
   useEffect(() => { setIsClient(true); }, []);
 
+  // ... (نفس الـ useEffects للوقت والاطباء والـ Realtime) ...
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
@@ -69,32 +67,11 @@ export default function DisplayScreen() {
     }
   }, [doctors]);
 
-  const handleVideoEnded = () => {
-    setVideoError(null);
-    setCurrentVideoIndex((prev) => (prev + 1) % LOCAL_VIDEOS.length);
-  };
-
-  const handleVideoError = (e: any) => {
-    const errorMsg = `Error playing: ${LOCAL_VIDEOS[currentVideoIndex]}`;
-    console.warn(errorMsg, e);
-    setVideoError(errorMsg); // إظهار الخطأ على الشاشة للحظات
-    
-    // الانتظار 3 ثواني قبل الانتقال للفيديو التالي حتى لا يدخل في حلقة سريعة
-    setTimeout(() => {
-        setCurrentVideoIndex((prev) => (prev + 1) % LOCAL_VIDEOS.length);
-    }, 3000);
-  };
-
-  // --- Realtime Listeners (تم اختصارها للتركيز) ---
+  // Realtime & Alert Logic (مختصرة للحفاظ على نظافة الرد)
   useEffect(() => {
     if (!isAuthenticated) return;
-    const queueChannel = supabase.channel('display-queue')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'queue', filter: 'is_emergency=eq.true' },
-        (payload) => { const clinicName = clinics.find(c => c.id === payload.new.clinic_id)?.clinic_name || 'العيادة'; triggerEmergency(clinicName); }
-      ).subscribe();
-    const alertChannel = supabase.channel('control-alerts')
-      .on('broadcast', { event: 'clinic-transfer' }, (payload) => { triggerTransferAlert(payload.payload); })
-      .subscribe();
+    const queueChannel = supabase.channel('display-queue').on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'queue', filter: 'is_emergency=eq.true' }, (payload) => { const clinicName = clinics.find(c => c.id === payload.new.clinic_id)?.clinic_name || 'العيادة'; triggerEmergency(clinicName); }).subscribe();
+    const alertChannel = supabase.channel('control-alerts').on('broadcast', { event: 'clinic-transfer' }, (payload) => { triggerTransferAlert(payload.payload); }).subscribe();
     return () => { supabase.removeChannel(queueChannel); supabase.removeChannel(alertChannel); };
   }, [isAuthenticated, clinics]);
 
@@ -103,45 +80,51 @@ export default function DisplayScreen() {
     if (isFirstLoad.current && clinics.length > 0) { prevClinicsRef.current = clinics; isFirstLoad.current = false; return; }
     clinics.forEach((clinic) => {
       const prevClinic = prevClinicsRef.current.find((c) => c.id === clinic.id);
-      if (prevClinic && clinic.last_call_time !== prevClinic.last_call_time && clinic.last_call_time) {
-          if (notification?.type !== 'emergency') { triggerAlert(clinic); }
-      }
+      if (prevClinic && clinic.last_call_time !== prevClinic.last_call_time && clinic.last_call_time) { if (notification?.type !== 'emergency') { triggerAlert(clinic); } }
     });
     prevClinicsRef.current = clinics;
   }, [clinics, isAuthenticated, isMuted, clinicsLoading]);
 
-  // --- Trigger Functions ---
-  const triggerEmergency = async (clinicName: string) => {
-    setNotification({ show: true, message: `⚠️ طوارئ: يرجى إخلاء الطريق لـ ${clinicName} ⚠️`, type: 'emergency' });
-    if (!isMuted) await playAudio('/audio/emergency.mp3').catch(console.error);
-    setTimeout(() => setNotification(null), 15000);
-  };
-  const triggerTransferAlert = async (data: any) => {
-    setNotification({ show: true, message: `( تحويل ) العميل رقم ${toArabicNumbers(data.ticketNumber)} التوجه إلى ${data.toClinicName}`, type: 'transfer', targetClinicId: data.toClinicId });
-    if (!isMuted) {
-      const audioFiles = ['/audio/ding.mp3', `/audio/${data.ticketNumber}.mp3`, `/audio/clinic${data.toClinicNumber}.mp3`];
-      try { await playSequentialAudio(audioFiles); } catch (e) { console.error(e); }
-    }
-    setTimeout(() => setNotification(null), 10000);
-  };
-  const triggerAlert = async (clinic: any) => {
-    setNotification({ show: true, message: `العميل رقم ${toArabicNumbers(clinic.current_number)} التوجه إلى ${clinic.clinic_name}`, type: 'normal', targetClinicId: clinic.id });
-    if (!isMuted) {
-      const audioFiles = ['/audio/ding.mp3', `/audio/${clinic.current_number}.mp3`, `/audio/clinic${clinic.clinic_number}.mp3`];
-      try { await playSequentialAudio(audioFiles); } catch (e) { console.error(e); }
-    }
-    setTimeout(() => setNotification(null), 10000);
-  };
+  // Trigger Functions
+  const triggerEmergency = async (clinicName: string) => { setNotification({ show: true, message: `⚠️ طوارئ: يرجى إخلاء الطريق لـ ${clinicName} ⚠️`, type: 'emergency' }); if (!isMuted) await playAudio('/audio/emergency.mp3').catch(console.error); setTimeout(() => setNotification(null), 15000); };
+  const triggerTransferAlert = async (data: any) => { setNotification({ show: true, message: `( تحويل ) العميل رقم ${toArabicNumbers(data.ticketNumber)} التوجه إلى ${data.toClinicName}`, type: 'transfer', targetClinicId: data.toClinicId }); if (!isMuted) { try { await playSequentialAudio(['/audio/ding.mp3', `/audio/${data.ticketNumber}.mp3`, `/audio/clinic${data.toClinicNumber}.mp3`]); } catch (e) { console.error(e); } } setTimeout(() => setNotification(null), 10000); };
+  const triggerAlert = async (clinic: any) => { setNotification({ show: true, message: `العميل رقم ${toArabicNumbers(clinic.current_number)} التوجه إلى ${clinic.clinic_name}`, type: 'normal', targetClinicId: clinic.id }); if (!isMuted) { try { await playSequentialAudio(['/audio/ding.mp3', `/audio/${clinic.current_number}.mp3`, `/audio/clinic${clinic.clinic_number}.mp3`]); } catch (e) { console.error(e); } } setTimeout(() => setNotification(null), 10000); };
 
-  // --- UI Handlers ---
+  // Handlers
   const handlePasswordSubmit = (e: React.FormEvent) => { e.preventDefault(); if (password === 'screen123') { setIsAuthenticated(true); setPassword(''); } else { alert('كلمة المرور غير صحيحة'); } };
   const handleFullscreen = () => { if (!document.fullscreenElement) { document.documentElement.requestFullscreen(); setIsFullscreen(true); } else { document.exitFullscreen(); setIsFullscreen(false); } };
+
+  // --- منطق الفيديو المحسن لـ Kiwi ---
+  const handleVideoEnded = () => {
+    setVideoError(null);
+    setCurrentVideoIndex((prev) => (prev + 1) % LOCAL_VIDEOS.length);
+  };
+
+  const handleVideoError = (e: any) => {
+    const errorMsg = `Error: ${LOCAL_VIDEOS[currentVideoIndex]}`;
+    console.error(errorMsg, e);
+    setVideoError(errorMsg);
+    // المحاولة التالية بعد ثانيتين
+    setTimeout(() => {
+        setCurrentVideoIndex((prev) => (prev + 1) % LOCAL_VIDEOS.length);
+    }, 2000);
+  };
+
+  // التأكد من تحميل الفيديو الجديد عند تغير الاندكس
+  useEffect(() => {
+    if (videoRef.current) {
+        videoRef.current.load();
+        videoRef.current.play().catch(err => console.log("Auto-play prevented:", err));
+    }
+  }, [currentVideoIndex]);
+
 
   if (!isClient || clinicsLoading) return <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-blue-600 to-purple-600 text-white"><div className="spinner mb-4 border-white border-t-transparent"></div></div>;
   
   if (!isAuthenticated) return (
     <div className="min-h-screen bg-gradient-to-br from-blue-900 to-slate-900 flex items-center justify-center p-4">
-      <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl shadow-2xl p-8 max-w-md w-full text-white">
+      {/* Login Form Code ... */}
+       <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl shadow-2xl p-8 max-w-md w-full text-white">
         <h1 className="text-3xl font-bold text-center mb-8">شاشة العرض المركزية</h1>
         <form onSubmit={handlePasswordSubmit} className="space-y-6">
           <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="كلمة المرور" className="w-full px-4 py-3 bg-white/10 border border-gray-500 rounded-lg text-white" autoFocus />
@@ -157,8 +140,8 @@ export default function DisplayScreen() {
   return (
     <div className={`min-h-screen bg-gray-900 text-white overflow-hidden relative flex flex-col font-cairo ${notification?.type === 'emergency' ? 'animate-pulse' : ''}`}>
       
-      {/* Notification Slider */}
-      <div className={`fixed top-0 left-0 w-full z-50 transform transition-transform duration-500 ease-out ${notification ? 'translate-y-0' : '-translate-y-full'}`}>
+      {/* Notification & Top Bar Code (نفس السابق) ... */}
+       <div className={`fixed top-0 left-0 w-full z-50 transform transition-transform duration-500 ease-out ${notification ? 'translate-y-0' : '-translate-y-full'}`}>
         <div className={`shadow-2xl border-b-8 border-white p-6 flex justify-center items-center h-32 ${notification?.type === 'emergency' ? 'bg-red-700' : notification?.type === 'transfer' ? 'bg-indigo-700' : 'bg-gradient-to-r from-amber-500 to-orange-600'}`}>
           <div className="flex items-center gap-6 w-full max-w-7xl justify-center">
             <div className="bg-white p-3 rounded-full animate-bounce shrink-0">
@@ -169,7 +152,6 @@ export default function DisplayScreen() {
         </div>
       </div>
 
-      {/* Top Bar */}
       <div className="h-24 bg-gradient-to-l from-slate-800 to-slate-900 border-b border-slate-700 flex items-center justify-between px-8 shadow-md z-40">
         <div className="flex items-center gap-8">
           <h1 className="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-cyan-300 drop-shadow-md">{settings?.center_name || 'المركز الطبي'}</h1>
@@ -193,10 +175,9 @@ export default function DisplayScreen() {
         </div>
       </div>
 
-      {/* Main Layout */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Left Column */}
-        <div className={`${isZoomed ? 'w-1/2' : 'w-1/3'} flex flex-col border-l border-slate-700 transition-all duration-500 ease-in-out`}>
+        {/* Left Column Code (نفس السابق) ... */}
+         <div className={`${isZoomed ? 'w-1/2' : 'w-1/3'} flex flex-col border-l border-slate-700 transition-all duration-500 ease-in-out`}>
           <div className="flex-1 bg-slate-100/5 backdrop-blur-sm p-4 flex flex-col gap-4 overflow-y-auto custom-scrollbar">
             {screenClinics.map((clinic) => (
               <div key={clinic.id} className={`relative overflow-hidden rounded-xl border transition-all duration-300 shadow-lg ${notification?.targetClinicId === clinic.id ? 'animate-flash z-10 scale-105' : ''} ${clinic.is_active ? 'bg-white border-blue-100' : 'bg-slate-200 border-slate-300 opacity-60 grayscale'}`}>
@@ -231,35 +212,29 @@ export default function DisplayScreen() {
           </div>
         </div>
 
-        {/* Right Column: Video (DEBUG MODE) */}
+        {/* Right Column: Video (Code Adjusted for Kiwi) */}
         <div className={`${isZoomed ? 'w-1/2' : 'w-2/3'} bg-black transition-all duration-500 ease-in-out relative border-r border-slate-800 flex items-center justify-center`}>
            {LOCAL_VIDEOS.length > 0 ? (
              <>
                <video
-                 key={LOCAL_VIDEOS[currentVideoIndex]}
                  ref={videoRef}
                  className="w-full h-full object-contain"
-                 autoPlay
                  muted={isMuted}
                  controls 
+                 playsInline
+                 // استخدمنا src مباشرة هنا بدلاً من source لضمان التحديث في Kiwi
+                 src={LOCAL_VIDEOS[currentVideoIndex]}
                  onEnded={handleVideoEnded}
                  onError={handleVideoError}
-                 playsInline
-               >
-                 <source src={LOCAL_VIDEOS[currentVideoIndex]} type="video/mp4" />
-               </video>
+               />
                
-               {/* طبقة تشخيص الأخطاء - تظهر فقط عند وجود خطأ */}
+               {/* Error Debugger */}
                {videoError && (
                  <div className="absolute inset-0 flex items-center justify-center bg-black/80 z-50">
                    <div className="bg-red-900/80 p-6 rounded-xl border border-red-500 text-white text-center max-w-lg">
-                     <h3 className="text-xl font-bold mb-2">فشل تشغيل الفيديو</h3>
-                     <p dir="ltr" className="font-mono text-sm bg-black/50 p-2 rounded mb-4 break-all">{videoError}</p>
-                     <ul className="text-right text-sm list-disc pr-4 space-y-2">
-                       <li>تأكد أن إعدادات Kiwi Browser تسمح بـ <b>Insecure Content</b> للموقع.</li>
-                       <li>تأكد أن تطبيق السيرفر يعمل على التلفاز.</li>
-                       <li>جرب فتح الرابط الموضح أعلاه في تبويب جديد للتأكد منه.</li>
-                     </ul>
+                     <h3 className="text-xl font-bold mb-2">تنبيه Kiwi Browser</h3>
+                     <p className="text-sm mb-4">يجب تفعيل خيار <b>Disable Private Network Access</b> من صفحة <b>chrome://flags</b></p>
+                     <p dir="ltr" className="font-mono text-xs text-white/50">{videoError}</p>
                    </div>
                  </div>
                )}
@@ -268,8 +243,8 @@ export default function DisplayScreen() {
         </div>
       </div>
 
-      {/* Footer */}
-      <div className="h-16 bg-blue-900 border-t border-blue-700 flex items-center relative overflow-hidden shadow-lg z-50">
+      {/* Footer (نفس السابق) ... */}
+       <div className="h-16 bg-blue-900 border-t border-blue-700 flex items-center relative overflow-hidden shadow-lg z-50">
          <div className="bg-blue-800 h-full px-8 flex items-center z-10 shadow-2xl skew-x-12 -ml-6"><span className="text-white font-bold whitespace-nowrap text-xl -skew-x-12">شريط الأخبار</span></div>
          <div className="absolute whitespace-nowrap animate-slide-left text-white text-2xl font-medium px-4 w-full pt-1" style={{ animationDuration: `${settings?.news_ticker_speed || 30}s` }}>{settings?.news_ticker_content}</div>
       </div>
