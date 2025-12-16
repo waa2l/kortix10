@@ -4,8 +4,8 @@ import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useClinics, useQueue } from '@/lib/hooks';
 import { supabase } from '@/lib/supabase';
-import { Lock, LogOut, Play, RotateCcw, AlertTriangle, Send, Pause, Bell, MessageSquare, X, ArrowRightLeft, Clock } from 'lucide-react';
-import { toArabicNumbers, playSequentialAudio, getArabicDate, getArabicTime } from '@/lib/utils';
+import { Lock, LogOut, Play, RotateCcw, AlertTriangle, Send, Pause, Bell, MessageSquare, X, ArrowRightLeft, Clock, User, Mic } from 'lucide-react';
+import { toArabicNumbers, playSequentialAudio, getArabicDate, getArabicTime, playAudio } from '@/lib/utils';
 
 export default function ControlPanel() {
   const router = useRouter();
@@ -22,11 +22,12 @@ export default function ControlPanel() {
   const [error, setError] = useState('');
   const [currentTime, setCurrentTime] = useState(new Date());
   
-  // Notification State (Updated: 3 Seconds)
+  // Notification State
   const [notification, setNotification] = useState<{ show: boolean; message: string; type?: 'normal' | 'emergency' | 'message' | 'transfer' } | null>(null);
   
   // Inputs State
   const [specialCallNumber, setSpecialCallNumber] = useState('');
+  const [patientName, setPatientName] = useState(''); // حالة جديدة لاسم العميل
   
   // Modals State
   const [showMsgModal, setShowMsgModal] = useState(false);
@@ -51,21 +52,24 @@ export default function ControlPanel() {
   }, []);
 
   // --- Realtime Logic (Listening) ---
-
+  // هذا الجزء يضمن تشغيل الصوت عندما تتحدث البيانات القادمة من السيرفر
   useEffect(() => {
     if (!isAuthenticated || clinicsLoading) return;
 
     clinics.forEach((clinic) => {
       const prevClinic = prevClinicsRef.current.find((c) => c.id === clinic.id);
       
+      // إذا تغير وقت آخر نداء، نقوم بتشغيل الصوت
       if (prevClinic && clinic.last_call_time !== prevClinic.last_call_time && clinic.last_call_time) {
         const callTime = new Date(clinic.last_call_time).getTime();
         const now = new Date().getTime();
         
+        // التحقق أن النداء حديث (أقل من 5 ثواني) لتجنب تشغيل الصوت عند تحميل الصفحة
         if (now - callTime < 5000) {
           triggerControlAlert(
             `تم نداء رقم ${toArabicNumbers(clinic.current_number)} - ${clinic.clinic_name}`,
             'normal',
+            // مصفوفة الصوت: Ding + الرقم + العيادة
             ['/audio/ding.mp3', `/audio/${clinic.current_number}.mp3`, `/audio/clinic${clinic.clinic_number}.mp3`]
           );
         }
@@ -107,11 +111,12 @@ export default function ControlPanel() {
   }, [selectedClinic, isAuthenticated]);
 
 
-  // دالة التنبيه الموحدة (تم تعديل الوقت لـ 3 ثواني)
+  // دالة التنبيه الموحدة وتشغيل الصوت
   const triggerControlAlert = async (message: string, type: 'normal' | 'emergency' | 'message' | 'transfer' = 'normal', audioFiles: string[] = []) => {
     setNotification({ show: true, message, type });
-    setTimeout(() => setNotification(null), 3000); // 3 Seconds
+    setTimeout(() => setNotification(null), 3000);
 
+    // تشغيل الصوت هنا في صفحة التحكم
     if (audioFiles.length > 0) {
       try {
         await playSequentialAudio(audioFiles);
@@ -121,6 +126,7 @@ export default function ControlPanel() {
 
   // --- Handlers (With Feedback) ---
 
+  // 1. النداء العادي
   const handleNextPatient = async () => {
     const clinic = clinics.find((c) => c.id === selectedClinic);
     if (clinic && clinic.is_active) {
@@ -129,13 +135,14 @@ export default function ControlPanel() {
           current_number: clinic.current_number + 1,
           last_call_time: new Date().toISOString()
         });
-        // Feedback handled by realtime listener
+        // الصوت سيتم تشغيله تلقائياً عبر الـ useEffect عند تحديث البيانات
       } catch (err) { triggerControlAlert('فشل التحديث', 'normal', ['/audio/ding.mp3']); }
     } else {
       triggerControlAlert('العيادة متوقفة حالياً', 'normal', ['/audio/ding.mp3']);
     }
   };
 
+  // 2. السابق
   const handlePreviousPatient = async () => {
     const clinic = clinics.find((c) => c.id === selectedClinic);
     if (clinic && clinic.current_number > 0) {
@@ -148,16 +155,18 @@ export default function ControlPanel() {
     }
   };
 
+  // 3. تكرار النداء
   const handleRepeatCall = async () => {
     const clinic = clinics.find((c) => c.id === selectedClinic);
     if (clinic && clinic.current_number > 0) {
        try {
-          await updateClinic(clinic.id, { last_call_time: new Date().toISOString() });
-          // Feedback handled by realtime listener
-        } catch (err) { alert('فشل التحديث'); }
+         await updateClinic(clinic.id, { last_call_time: new Date().toISOString() });
+         // الصوت يعمل تلقائياً
+       } catch (err) { alert('فشل التحديث'); }
     }
   };
 
+  // 4. نداء خاص (برقم)
   const handleSpecialCall = async () => {
     if (!specialCallNumber) return;
     const clinic = clinics.find((c) => c.id === selectedClinic);
@@ -168,8 +177,33 @@ export default function ControlPanel() {
           last_call_time: new Date().toISOString()
         });
         setSpecialCallNumber('');
-        // Feedback handled by realtime listener
       } catch (err) { alert('فشل النداء الخاص'); }
+    }
+  };
+
+  // 5. نداء بالاسم (الخاصية الجديدة)
+  const handleNameAlert = async () => {
+    if (!patientName) return;
+    const clinic = clinics.find(c => c.id === selectedClinic);
+    
+    try {
+      // إرسال برودكاست لشاشة العرض
+      const channel = supabase.channel('control-alerts');
+      await channel.send({
+        type: 'broadcast',
+        event: 'name-alert', // حدث جديد سنستقبله في شاشة العرض
+        payload: {
+          name: patientName,
+          clinicName: clinic?.clinic_name || 'العيادة'
+        }
+      });
+
+      // تشغيل الصوت Ding فقط هنا في صفحة التحكم
+      triggerControlAlert(`جاري نداء: ${patientName}`, 'normal', ['/audio/ding.mp3']);
+      
+      setPatientName(''); // تفريغ الحقل
+    } catch (err) {
+      alert('فشل الإرسال');
     }
   };
 
@@ -194,7 +228,6 @@ export default function ControlPanel() {
         });
         setShowTransferModal(false);
         setTransferTargetClinic('');
-        // Feedback handled by realtime listener
       } catch (err) {
         alert('فشل التحويل');
       }
@@ -215,6 +248,7 @@ export default function ControlPanel() {
             called_at: new Date().toISOString(),
             completed_at: null
           });
+          // تشغيل صوت الطوارئ في التحكم
           triggerControlAlert('تم إطلاق نداء الطوارئ!', 'emergency', ['/audio/emergency.mp3']);
         } catch (err) { alert('فشل إرسال نداء الطوارئ'); }
       }
@@ -331,7 +365,7 @@ export default function ControlPanel() {
         </div>
       </div>
 
-      {/* Notification Bar (3 Seconds) */}
+      {/* Notification Bar */}
       <div className={`fixed top-0 left-0 w-full z-50 transform transition-transform duration-300 ${notification ? 'translate-y-0' : '-translate-y-full'}`}>
         <div className={`p-4 shadow-lg flex items-center justify-center gap-3 ${
           notification?.type === 'emergency' ? 'bg-red-600' : 
@@ -360,7 +394,6 @@ export default function ControlPanel() {
           <span className="text-2xl font-bold">تكرار النداء</span>
         </button>
 
-        {/* Transfer Button */}
         <button onClick={() => setShowTransferModal(true)} disabled={!clinic?.is_active} className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 p-8 rounded-xl flex flex-col items-center gap-3 shadow-lg border-b-4 border-indigo-800 transition-transform active:scale-95">
           <ArrowRightLeft className="w-12 h-12" />
           <span className="text-2xl font-bold">تحويل العميل الحالي</span>
@@ -382,10 +415,12 @@ export default function ControlPanel() {
         </button>
       </div>
 
-      {/* Extra Tools */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      {/* Extra Tools Section */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        
+        {/* نداء خاص برقم */}
         <div className="bg-gray-800 p-6 rounded-xl border border-gray-700">
-          <h3 className="text-xl font-bold mb-4 flex items-center gap-2"><Send className="w-5 h-5 text-blue-400"/> نداء خاص</h3>
+          <h3 className="text-xl font-bold mb-4 flex items-center gap-2"><Send className="w-5 h-5 text-blue-400"/> نداء برقم محدد</h3>
           <div className="flex gap-2">
             <input 
               type="number" 
@@ -398,13 +433,30 @@ export default function ControlPanel() {
           </div>
         </div>
 
-        <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 flex items-center justify-between">
-          <h3 className="text-xl font-bold flex items-center gap-2"><MessageSquare className="w-5 h-5 text-purple-400"/> تنبيه نصي لعيادة</h3>
-          <button onClick={() => setShowMsgModal(true)} className="bg-purple-600 hover:bg-purple-700 px-6 py-2 rounded-lg font-bold">إرسال رسالة</button>
+        {/* نداء باسم (جديد) */}
+        <div className="bg-gray-800 p-6 rounded-xl border border-gray-700">
+          <h3 className="text-xl font-bold mb-4 flex items-center gap-2"><Mic className="w-5 h-5 text-green-400"/> نداء باسم العميل</h3>
+          <div className="flex gap-2">
+            <input 
+              type="text" 
+              value={patientName}
+              onChange={(e) => setPatientName(e.target.value)}
+              placeholder="اسم العميل" 
+              className="flex-1 bg-gray-700 border-gray-600 rounded-lg px-4 text-white focus:ring-2 focus:ring-green-500 outline-none" 
+            />
+            <button onClick={handleNameAlert} className="bg-green-600 hover:bg-green-700 px-6 py-2 rounded-lg font-bold">نداء</button>
+          </div>
         </div>
+
+        {/* رسالة لعيادة أخرى */}
+        <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 flex flex-col justify-center">
+          <h3 className="text-xl font-bold flex items-center gap-2 mb-4"><MessageSquare className="w-5 h-5 text-purple-400"/> تنبيه نصي لعيادة</h3>
+          <button onClick={() => setShowMsgModal(true)} className="w-full bg-purple-600 hover:bg-purple-700 px-6 py-2 rounded-lg font-bold">إرسال رسالة</button>
+        </div>
+
       </div>
 
-      {/* Message Modal */}
+      {/* Modals (Msg & Transfer) */}
       {showMsgModal && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[100]">
           <div className="bg-gray-800 p-8 rounded-2xl w-full max-w-lg border border-gray-700 relative">
@@ -422,7 +474,6 @@ export default function ControlPanel() {
         </div>
       )}
 
-      {/* Transfer Modal */}
       {showTransferModal && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[100]">
           <div className="bg-gray-800 p-8 rounded-2xl w-full max-w-lg border border-gray-700 relative">
