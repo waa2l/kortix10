@@ -7,6 +7,19 @@ import { supabase } from '@/lib/supabase';
 import { Lock, LogOut, Maximize, Minimize, Volume2, VolumeX, Bell, Activity, Ban, Clock, User, ZoomIn, ZoomOut, AlertTriangle, ArrowRightLeft } from 'lucide-react';
 import { toArabicNumbers, getArabicDate, getArabicTime, playSequentialAudio, playAudio } from '@/lib/utils'; 
 
+// --- إعدادات الفيديو المحلي ---
+const SERVER_IP = 'http://192.168.1.48:8080'; // رابط السيرفر الذي ظهر لك
+const VIDEOS_COUNT = 29; // عدد الفيديوهات
+
+// توليد قائمة الفيديوهات تلقائياً من 1 إلى 29
+// ملاحظة: يتم إضافة video/ في الرابط إذا كان السيرفر يشير للمجلد الرئيسي
+// إذا كان السيرفر يشير مباشرة لمجلد video، احذف /video من السطر التالي
+const LOCAL_VIDEOS = Array.from({ length: VIDEOS_COUNT }, (_, i) => {
+  const fileName = `video (${i + 1}).mp4`;
+  // تشفير الاسم للتعامل مع المسافات والأقواس
+  return `${SERVER_IP}/${encodeURIComponent(fileName)}`;
+});
+
 export default function DisplayScreen() {
   const router = useRouter();
   
@@ -19,11 +32,15 @@ export default function DisplayScreen() {
   const [password, setPassword] = useState('');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [isMuted, setIsMuted] = useState(false);
+  const [isMuted, setIsMuted] = useState(false); // سأجعله false افتراضياً ليسمع الناس الصوت
   const [currentTime, setCurrentTime] = useState(new Date());
   const [isZoomed, setIsZoomed] = useState(false);
   const [currentDoctorIndex, setCurrentDoctorIndex] = useState(0);
   
+  // Video State
+  const [currentVideoIndex, setCurrentVideoIndex] = useState(0);
+  const videoRef = useRef<HTMLVideoElement>(null);
+
   // Notification State
   const [notification, setNotification] = useState<{ 
     show: boolean; 
@@ -42,6 +59,7 @@ export default function DisplayScreen() {
     return () => clearInterval(timer);
   }, []);
 
+  // تدوير الأطباء
   useEffect(() => {
     if (doctors.length > 0) {
       const doctorTimer = setInterval(() => {
@@ -51,8 +69,12 @@ export default function DisplayScreen() {
     }
   }, [doctors]);
 
-  // --- Realtime Listeners ---
+  // الانتقال للفيديو التالي عند انتهاء الحالي
+  const handleVideoEnded = () => {
+    setCurrentVideoIndex((prev) => (prev + 1) % LOCAL_VIDEOS.length);
+  };
 
+  // --- Realtime Listeners ---
   useEffect(() => {
     if (!isAuthenticated) return;
 
@@ -181,7 +203,7 @@ export default function DisplayScreen() {
   return (
     <div className={`min-h-screen bg-gray-900 text-white overflow-hidden relative flex flex-col font-cairo ${notification?.type === 'emergency' ? 'animate-pulse' : ''}`}>
       
-      {/* === Notification Slider (Updated Font Size) === */}
+      {/* === Notification Slider === */}
       <div className={`fixed top-0 left-0 w-full z-50 transform transition-transform duration-500 ease-out ${notification ? 'translate-y-0' : '-translate-y-full'}`}>
         <div className={`shadow-2xl border-b-8 border-white p-6 flex justify-center items-center h-32 ${
           notification?.type === 'emergency' ? 'bg-red-700' : 
@@ -194,7 +216,6 @@ export default function DisplayScreen() {
                 notification?.type === 'transfer' ? <ArrowRightLeft className="w-12 h-12 text-indigo-600" /> :
                 <Bell className="w-12 h-12 text-orange-600" />}
             </div>
-            {/* تم تصغير الخط قليلاً من 7xl إلى 5xl/6xl */}
             <h2 className="text-4xl md:text-5xl lg:text-6xl font-black text-white drop-shadow-lg whitespace-nowrap overflow-hidden text-ellipsis leading-tight">
               {notification?.message}
             </h2>
@@ -202,7 +223,7 @@ export default function DisplayScreen() {
         </div>
       </div>
 
-      {/* === Top Bar (Updated Fonts) === */}
+      {/* === Top Bar === */}
       <div className="h-24 bg-gradient-to-l from-slate-800 to-slate-900 border-b border-slate-700 flex items-center justify-between px-8 shadow-md z-40">
         <div className="flex items-center gap-8">
           <h1 className="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-cyan-300 drop-shadow-md">
@@ -231,13 +252,13 @@ export default function DisplayScreen() {
         </div>
       </div>
 
-      {/* === Main Layout (Updated: Doctors moved to left) === */}
+      {/* === Main Layout === */}
       <div className="flex-1 flex overflow-hidden">
         
-        {/* --- Left Column: Clinics & Doctors (Dynamic Width) --- */}
+        {/* --- Left Column: Clinics & Doctors --- */}
         <div className={`${isZoomed ? 'w-1/2' : 'w-1/3'} flex flex-col border-l border-slate-700 transition-all duration-500 ease-in-out`}>
           
-          {/* A. Clinics List (Scrollable) */}
+          {/* A. Clinics List */}
           <div className="flex-1 bg-slate-100/5 backdrop-blur-sm p-4 flex flex-col gap-4 overflow-y-auto custom-scrollbar">
             {screenClinics.map((clinic) => (
               <div key={clinic.id} className={`
@@ -265,7 +286,7 @@ export default function DisplayScreen() {
             ))}
           </div>
 
-          {/* B. Doctor Rotator (Moved Here - Fixed Height) */}
+          {/* B. Doctor Rotator */}
           <div className="h-48 bg-gradient-to-r from-slate-900 to-slate-800 border-t-4 border-slate-700 relative overflow-hidden shrink-0">
              {doctors.length > 0 && currentDoctor ? (
                <div key={currentDoctor.id} className="h-full flex items-center p-6 animate-slide-in-right">
@@ -277,7 +298,6 @@ export default function DisplayScreen() {
                     <h2 className="text-3xl font-bold text-white mb-1 drop-shadow-md">{currentDoctor.full_name}</h2>
                     <p className="text-xl text-blue-300 flex items-center gap-2"><Activity className="w-5 h-5"/>{currentDoctor.specialization}</p>
                  </div>
-                 {/* Decorative Icon */}
                  <User className="absolute -left-6 -bottom-6 w-48 h-48 text-white/5 rotate-12 z-0" />
                </div>
              ) : <div className="h-full flex items-center justify-center text-slate-500"><p>جاري تحميل بيانات الأطباء...</p></div>}
@@ -285,20 +305,30 @@ export default function DisplayScreen() {
 
         </div>
 
-        {/* --- Right Column: Video Only (Dynamic Width) --- */}
-        <div className={`${isZoomed ? 'w-1/2' : 'w-2/3'} bg-black transition-all duration-500 ease-in-out relative border-r border-slate-800`}>
-          <div className="w-full h-full">
-            <iframe 
-              width="100%" 
-              height="100%" 
-              src="https://www.youtube.com/embed/videoseries?list=PLDQLuvEh-UTIqyEyZzAKPBwJ0iiZrQzsF&autoplay=1&loop=1&mute=1" 
-              title="Medical Awareness" 
-              frameBorder="0" 
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
-              allowFullScreen
-              className="pointer-events-none"
-            ></iframe>
-          </div>
+        {/* --- Right Column: Video Only (LOCAL SERVER) --- */}
+        <div className={`${isZoomed ? 'w-1/2' : 'w-2/3'} bg-black transition-all duration-500 ease-in-out relative border-r border-slate-800 flex items-center justify-center`}>
+           {LOCAL_VIDEOS.length > 0 ? (
+             <video
+               key={LOCAL_VIDEOS[currentVideoIndex]}
+               ref={videoRef}
+               className="w-full h-full object-contain"
+               autoPlay
+               muted={isMuted}
+               controls // إظهار أزرار التحكم
+               onEnded={handleVideoEnded}
+               onError={(e) => console.error("Video Error:", e)}
+             >
+               <source src={LOCAL_VIDEOS[currentVideoIndex]} type="video/mp4" />
+               متصفحك لا يدعم تشغيل الفيديو.
+             </video>
+           ) : (
+             <div className="text-white text-xl">لا توجد فيديوهات للعرض</div>
+           )}
+           
+           {/* Debug info - يمكن إزالته لاحقاً */}
+           <div className="absolute top-2 right-2 bg-black/50 text-xs text-white p-1 rounded pointer-events-none">
+             Source: {LOCAL_VIDEOS[currentVideoIndex]}
+           </div>
         </div>
 
       </div>
