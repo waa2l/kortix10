@@ -8,16 +8,16 @@ import { Lock, LogOut, Maximize, Minimize, Volume2, VolumeX, Bell, Activity, Ban
 import { toArabicNumbers, getArabicDate, getArabicTime, playSequentialAudio, playAudio } from '@/lib/utils'; 
 
 // --- إعدادات الفيديو المحلي ---
-const SERVER_IP = 'http://192.168.1.48:8080'; // رابط السيرفر الذي ظهر لك
-const VIDEOS_COUNT = 29; // عدد الفيديوهات
+const SERVER_IP = 'http://192.168.1.48:8080'; // تأكد أن هذا الآي بي ثابت ولم يتغير
+const VIDEOS_COUNT = 28; // عدد الفيديوهات (من 1.mp4 إلى 28.mp4)
 
-// توليد قائمة الفيديوهات تلقائياً من 1 إلى 29
-// ملاحظة: يتم إضافة video/ في الرابط إذا كان السيرفر يشير للمجلد الرئيسي
-// إذا كان السيرفر يشير مباشرة لمجلد video، احذف /video من السطر التالي
+// توليد قائمة الفيديوهات تلقائياً (1.mp4, 2.mp4 ...)
 const LOCAL_VIDEOS = Array.from({ length: VIDEOS_COUNT }, (_, i) => {
-  const fileName = `video (${i + 1}).mp4`;
-  // تشفير الاسم للتعامل مع المسافات والأقواس
-  return `${SERVER_IP}/${encodeURIComponent(fileName)}`;
+  // ملاحظة: إذا كنت قد اخترت مجلد videos داخل تطبيق السيرفر ليكون هو الجذر (Root)، فالرابط يكون مباشرة:
+  return `${SERVER_IP}/${i + 1}.mp4`;
+  
+  // أما إذا كان السيرفر يقرأ الذاكرة كاملة، قد تحتاج لإضافة اسم المجلد هكذا:
+  // return `${SERVER_IP}/videos/${i + 1}.mp4`;
 });
 
 export default function DisplayScreen() {
@@ -32,7 +32,7 @@ export default function DisplayScreen() {
   const [password, setPassword] = useState('');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [isMuted, setIsMuted] = useState(false); // سأجعله false افتراضياً ليسمع الناس الصوت
+  const [isMuted, setIsMuted] = useState(false); 
   const [currentTime, setCurrentTime] = useState(new Date());
   const [isZoomed, setIsZoomed] = useState(false);
   const [currentDoctorIndex, setCurrentDoctorIndex] = useState(0);
@@ -59,7 +59,6 @@ export default function DisplayScreen() {
     return () => clearInterval(timer);
   }, []);
 
-  // تدوير الأطباء
   useEffect(() => {
     if (doctors.length > 0) {
       const doctorTimer = setInterval(() => {
@@ -69,8 +68,14 @@ export default function DisplayScreen() {
     }
   }, [doctors]);
 
-  // الانتقال للفيديو التالي عند انتهاء الحالي
+  // دالة لتشغيل الفيديو التالي
   const handleVideoEnded = () => {
+    setCurrentVideoIndex((prev) => (prev + 1) % LOCAL_VIDEOS.length);
+  };
+
+  // معالجة خطأ الفيديو (لو ملف ناقص ينتقل للي بعده)
+  const handleVideoError = () => {
+    console.warn(`فشل تشغيل الفيديو: ${LOCAL_VIDEOS[currentVideoIndex]}، الانتقال للتالي...`);
     setCurrentVideoIndex((prev) => (prev + 1) % LOCAL_VIDEOS.length);
   };
 
@@ -305,7 +310,7 @@ export default function DisplayScreen() {
 
         </div>
 
-        {/* --- Right Column: Video Only (LOCAL SERVER) --- */}
+        {/* --- Right Column: Video Only (Local Storage) --- */}
         <div className={`${isZoomed ? 'w-1/2' : 'w-2/3'} bg-black transition-all duration-500 ease-in-out relative border-r border-slate-800 flex items-center justify-center`}>
            {LOCAL_VIDEOS.length > 0 ? (
              <video
@@ -314,20 +319,23 @@ export default function DisplayScreen() {
                className="w-full h-full object-contain"
                autoPlay
                muted={isMuted}
-               controls // إظهار أزرار التحكم
+               controls 
                onEnded={handleVideoEnded}
-               onError={(e) => console.error("Video Error:", e)}
+               onError={handleVideoError} // إذا فشل فيديو ينتقل للي بعده
              >
                <source src={LOCAL_VIDEOS[currentVideoIndex]} type="video/mp4" />
-               متصفحك لا يدعم تشغيل الفيديو.
+               <p className="text-white text-center">
+                  المتصفح لا يمكنه الوصول للسيرفر المحلي.<br/>
+                  تأكد من إعدادات Kiwi Browser للسماح بـ Insecure Content.
+               </p>
              </video>
            ) : (
              <div className="text-white text-xl">لا توجد فيديوهات للعرض</div>
            )}
            
-           {/* Debug info - يمكن إزالته لاحقاً */}
-           <div className="absolute top-2 right-2 bg-black/50 text-xs text-white p-1 rounded pointer-events-none">
-             Source: {LOCAL_VIDEOS[currentVideoIndex]}
+           {/* معلومات التصحيح (تظهر فقط عند حدوث مشكلة) */}
+           <div className="absolute bottom-2 left-2 bg-black/20 text-[10px] text-white/30 p-1 pointer-events-none">
+             Server: {SERVER_IP} | File: {currentVideoIndex + 1}.mp4
            </div>
         </div>
 
