@@ -118,13 +118,11 @@ export default function DisplayScreen() {
         if (!isMuted) playAudio('/audio/ding.mp3').catch(console.error);
         setTimeout(() => setNotification(null), 10000);
       })
-      // +++ جديد: تشغيل الملفات الجاهزة +++
       .on('broadcast', { event: 'play-instant' }, (payload) => {
         if (!isMuted && payload.payload.file) {
           playAudio(`/audio/${payload.payload.file}`).catch(console.error);
         }
       })
-      // +++ جديد: تشغيل الصوت المباشر (المسجل) +++
       .on('broadcast', { event: 'voice-broadcast' }, (payload) => {
         if (!isMuted && payload.payload.audioData) {
           // تشغيل تنبيه أولاً
@@ -136,6 +134,24 @@ export default function DisplayScreen() {
           
           setNotification({ show: true, message: '🎙️ تنبيه صوتي من الإدارة', type: 'normal' });
           setTimeout(() => setNotification(null), 10000);
+        }
+      })
+      // +++ جديد: التحكم في الفيديو عن بعد +++
+      .on('broadcast', { event: 'video-control' }, (payload) => {
+        const { command, value } = payload.payload;
+        
+        if (videoRef.current) {
+          if (command === 'play') videoRef.current.play().catch(console.error);
+          if (command === 'pause') videoRef.current.pause();
+          if (command === 'next') handleVideoEnded(); // الانتقال للتالي
+          if (command === 'prev') {
+             // الرجوع للسابق
+             setCurrentVideoIndex(prev => prev === 0 ? LOCAL_VIDEOS.length - 1 : prev - 1);
+          }
+          if (command === 'volume') {
+            // القيمة تأتي من 0.0 إلى 1.0
+            videoRef.current.volume = Math.max(0, Math.min(1, value));
+          }
         }
       })
       .subscribe();
