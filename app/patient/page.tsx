@@ -1,278 +1,238 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useClinics, useQueue, usePatients } from '@/lib/hooks';
-import { QrCode, MessageSquare, AlertCircle } from 'lucide-react';
-import Link from 'next/link';
-import { toArabicNumbers } from '@/lib/utils';
+import { useState, useEffect, useRef } from 'react';
+import { useClinics, useSettings } from '@/lib/hooks';
+import { User, Activity, Clock, Bell, Volume2, Search, ArrowRight, CheckCircle, AlertTriangle } from 'lucide-react';
+import { toArabicNumbers, getArabicDate, playAudio } from '@/lib/utils';
 
 export default function PatientPage() {
-  const { clinics, loading: clinicsLoading } = useClinics();
-  const { queue } = useQueue();
-  const { addPatient } = usePatients();
-  const [isClient, setIsClient] = useState(false);
-  const [selectedClinic, setSelectedClinic] = useState('');
-  const [ticketNumber, setTicketNumber] = useState('');
-  const [email, setEmail] = useState('');
-  const [phone, setPhone] = useState('');
-  const [complaintType, setComplaintType] = useState('complaint');
-  const [complaintText, setComplaintText] = useState('');
-  const [showComplaintForm, setShowComplaintForm] = useState(false);
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
+  const { clinics, loading } = useClinics();
+  const { settings } = useSettings();
+  
+  // States للمتابعة
+  const [selectedClinicId, setSelectedClinicId] = useState('');
+  const [myTicketNumber, setMyTicketNumber] = useState('');
+  const [isTracking, setIsTracking] = useState(false);
+  const [notification, setNotification] = useState<{ type: 'info' | 'warning' | 'success', message: string } | null>(null);
+  
+  // Ref لمنع تكرار الصوت لنفس الرقم
+  const lastAnnouncedNumberRef = useRef<number>(-1);
 
+  // --- Logic ---
+
+  // دالة بدء التتبع (مهمة لتفعيل الصوت في المتصفح)
+  const handleStartTracking = () => {
+    if (!selectedClinicId || !myTicketNumber) return;
+    setIsTracking(true);
+    
+    // خدعة لتفعيل الصوت: تشغيل ملف صامت أو قصير جداً عند ضغط الزر
+    // هذا يسمح للمتصفح بتشغيل الأصوات لاحقاً بدون تدخل المستخدم
+    playAudio('/audio/ding.mp3').then(() => {
+        // Stop immediately just to unlock audio context
+    }).catch(() => {});
+  };
+
+  const handleStopTracking = () => {
+    setIsTracking(false);
+    setNotification(null);
+    lastAnnouncedNumberRef.current = -1;
+  };
+
+  // مراقبة الوضع الحالي
   useEffect(() => {
-    setIsClient(true);
-  }, []);
+    if (!isTracking || !selectedClinicId) return;
 
-  const handleGetTicket = (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
-    setSuccess('');
+    const clinic = clinics.find(c => c.id === selectedClinicId);
+    if (!clinic) return;
 
-    if (!selectedClinic) {
-      setError('يرجى اختيار عيادة');
-      return;
+    const myNum = parseInt(myTicketNumber);
+    const currentNum = clinic.current_number;
+    const diff = myNum - currentNum;
+
+    // منطق التنبيهات
+    if (currentNum >= myNum) {
+      // حان الدور (أو فات)
+      if (lastAnnouncedNumberRef.current !== currentNum) {
+        setNotification({ type: 'success', message: 'حان دورك الآن! يرجى الدخول للعيادة' });
+        // تشغيل صوت وتنبيه
+        playAudio('/audio/ding.mp3');
+        // يمكن إضافة نطق هنا إذا توفرت المكتبة، حالياً نكتفي بالـ ding القوي
+        lastAnnouncedNumberRef.current = currentNum;
+      }
+    } else if (diff <= 3 && diff > 0) {
+      // اقترب الدور
+      if (notification?.type !== 'warning') {
+        setNotification({ type: 'warning', message: `استعد! يتبقى ${toArabicNumbers(diff)} عملاء فقط أمامك` });
+        playAudio('/audio/ding.mp3'); // تنبيه خفيف
+      }
+    } else {
+      // لا يزال الانتظار
+      setNotification({ type: 'info', message: 'يرجى الانتظار في الاستراحة' });
     }
 
-    // Generate ticket number
-    const newTicket = Math.floor(Math.random() * 1000) + 1;
-    setTicketNumber(newTicket.toString());
-    setSuccess(`تم إصدار التذكرة رقم ${toArabicNumbers(newTicket)}`);
-  };
+  }, [clinics, isTracking, selectedClinicId, myTicketNumber, notification?.type]);
 
-  const handleSubmitComplaint = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
-    setSuccess('');
 
-    if (complaintText.length < 10) {
-      setError('يجب أن تكون الشكوى على الأقل 10 أحرف');
-      return;
-    }
-
-    try {
-      // Submit complaint to database
-      setSuccess('تم إرسال الشكوى بنجاح');
-      setComplaintText('');
-      setShowComplaintForm(false);
-      setTimeout(() => setSuccess(''), 3000);
-    } catch (err) {
-      setError('خطأ في إرسال الشكوى');
-    }
-  };
-
-  if (!isClient || clinicsLoading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-blue-50 to-purple-50">
-        <div className="text-center">
-          <div className="spinner mb-4"></div>
-          <p className="text-gray-600">جاري التحميل...</p>
-        </div>
-      </div>
-    );
-  }
+  // --- Render Helpers ---
+  const selectedClinicData = clinics.find(c => c.id === selectedClinicId);
+  const turnsRemaining = selectedClinicData ? parseInt(myTicketNumber) - selectedClinicData.current_number : 0;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-purple-50 p-4">
+    <div className="min-h-screen bg-slate-50 font-cairo text-slate-800 pb-20">
+      
       {/* Header */}
-      <header className="bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-lg rounded-lg mb-8 p-6">
-        <h1 className="text-3xl font-bold text-center">صفحة العميل</h1>
-        <p className="text-center text-blue-100 mt-2">تتبع الطابور والشكاوى</p>
+      <header className="bg-blue-600 text-white p-6 shadow-lg rounded-b-3xl">
+        <div className="flex justify-between items-center mb-4">
+          <div>
+            <h1 className="text-2xl font-bold">{settings?.center_name || 'المركز الطبي'}</h1>
+            <p className="text-blue-100 text-sm opacity-90">{getArabicDate(new Date())}</p>
+          </div>
+          <div className="bg-white/20 p-2 rounded-full backdrop-blur-sm">
+            <User className="w-6 h-6 text-white" />
+          </div>
+        </div>
+        {!isTracking && (
+          <p className="text-blue-50 text-sm">أدخل بياناتك لمتابعة دورك وتلقي التنبيهات</p>
+        )}
       </header>
 
-      <div className="max-w-4xl mx-auto">
-        {/* Alerts */}
-        {error && (
-          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
-            <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
-            <p className="text-red-700">{error}</p>
-          </div>
-        )}
+      <main className="p-6 -mt-6">
+        
+        {/* === حالة التتبع (Tracking Mode) === */}
+        {isTracking && selectedClinicData ? (
+          <div className="space-y-6">
+            
+            {/* Status Card */}
+            <div className={`bg-white rounded-2xl shadow-xl p-6 border-t-8 transition-all duration-500 ${
+              turnsRemaining <= 0 ? 'border-green-500 shadow-green-100' : 
+              turnsRemaining <= 3 ? 'border-amber-500 shadow-amber-100' : 'border-blue-500 shadow-blue-100'
+            }`}>
+              
+              <div className="flex justify-between items-start mb-6 border-b border-slate-100 pb-4">
+                <div>
+                  <h2 className="text-xl font-bold text-slate-800">{selectedClinicData.clinic_name}</h2>
+                  <p className="text-slate-500 text-sm">تذكرتك رقم: <span className="font-bold text-slate-800">{toArabicNumbers(myTicketNumber)}</span></p>
+                </div>
+                {turnsRemaining <= 0 ? <CheckCircle className="w-8 h-8 text-green-500 animate-pulse"/> : 
+                 turnsRemaining <= 3 ? <AlertTriangle className="w-8 h-8 text-amber-500 animate-bounce"/> :
+                 <Activity className="w-8 h-8 text-blue-500"/>}
+              </div>
 
-        {success && (
-          <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg">
-            <p className="text-green-700">{success}</p>
-          </div>
-        )}
+              <div className="flex flex-col items-center justify-center py-4">
+                 {turnsRemaining > 0 ? (
+                   <>
+                     <p className="text-slate-400 text-sm mb-2">الدور الحالي بالعيادة</p>
+                     <p className="text-7xl font-black text-slate-800 mb-6">{toArabicNumbers(selectedClinicData.current_number)}</p>
+                     
+                     <div className="bg-slate-50 rounded-xl p-4 w-full flex justify-between items-center">
+                        <span className="text-slate-600 font-bold">أمامك:</span>
+                        <span className="bg-slate-200 text-slate-800 px-3 py-1 rounded-lg font-bold">{toArabicNumbers(turnsRemaining)}</span>
+                     </div>
+                   </>
+                 ) : (
+                   <div className="text-center py-6">
+                     <p className="text-4xl font-bold text-green-600 mb-2">حان دورك!</p>
+                     <p className="text-slate-500">يرجى التوجه للعيادة فوراً</p>
+                   </div>
+                 )}
+              </div>
 
-        {/* Main Content */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          {/* Get Ticket Section */}
-          <div className="bg-white rounded-lg shadow-lg p-8">
-            <div className="flex items-center gap-3 mb-6">
-              <QrCode className="w-8 h-8 text-blue-600" />
-              <h2 className="text-2xl font-bold text-gray-800">الحصول على تذكرة</h2>
+              {/* Notification Message */}
+              {notification && (
+                <div className={`mt-4 p-4 rounded-xl flex items-center gap-3 ${
+                  notification.type === 'success' ? 'bg-green-100 text-green-800' :
+                  notification.type === 'warning' ? 'bg-amber-100 text-amber-800' : 'bg-blue-50 text-blue-800'
+                }`}>
+                  <Bell className="w-5 h-5 shrink-0" />
+                  <p className="font-bold text-sm">{notification.message}</p>
+                </div>
+              )}
             </div>
 
-            <form onSubmit={handleGetTicket} className="space-y-6">
-              {/* Clinic Selection */}
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">اختر العيادة</label>
-                <select
-                  value={selectedClinic}
-                  onChange={(e) => setSelectedClinic(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  required
+            <button 
+              onClick={handleStopTracking}
+              className="w-full bg-slate-200 text-slate-700 py-4 rounded-xl font-bold hover:bg-slate-300 transition-colors flex items-center justify-center gap-2"
+            >
+              إلغاء المتابعة
+            </button>
+
+          </div>
+        ) : (
+          /* === وضع الإدخال (Input Mode) === */
+          <div className="bg-white rounded-2xl shadow-xl p-6 space-y-6">
+            
+            <div className="space-y-2">
+              <label className="text-slate-700 font-bold block">اختر العيادة</label>
+              <div className="relative">
+                <Search className="absolute right-3 top-3.5 text-slate-400 w-5 h-5" />
+                <select 
+                  value={selectedClinicId} 
+                  onChange={(e) => setSelectedClinicId(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-10 py-3 appearance-none outline-none focus:ring-2 focus:ring-blue-500 text-slate-700"
                 >
-                  <option value="">-- اختر عيادة --</option>
-                  {clinics.map((clinic) => (
-                    <option key={clinic.id} value={clinic.id}>
-                      {clinic.clinic_name}
-                    </option>
+                  <option value="">-- اضغط للاختيار --</option>
+                  {clinics.filter(c => c.is_active).map(clinic => (
+                    <option key={clinic.id} value={clinic.id}>{clinic.clinic_name}</option>
                   ))}
                 </select>
               </div>
+            </div>
 
-              {/* Current Number Display */}
-              {selectedClinic && (
-                <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
-                  <p className="text-sm text-gray-600 mb-2">الرقم الحالي في العيادة</p>
-                  <p className="text-4xl font-bold text-blue-600">
-                    {toArabicNumbers(
-                      clinics.find((c) => c.id === selectedClinic)?.current_number || 0
-                    )}
-                  </p>
-                </div>
-              )}
-
-              {/* Email (Optional) */}
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">البريد الإلكتروني (اختياري)</label>
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="your@email.com"
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            <div className="space-y-2">
+              <label className="text-slate-700 font-bold block">رقم التذكرة</label>
+              <div className="relative">
+                <div className="absolute right-0 top-0 bottom-0 w-12 flex items-center justify-center bg-slate-100 rounded-r-xl border border-slate-200 text-slate-500 font-bold">#</div>
+                <input 
+                  type="number" 
+                  value={myTicketNumber}
+                  onChange={(e) => setMyTicketNumber(e.target.value)}
+                  placeholder="مثال: 45"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 pr-14 outline-none focus:ring-2 focus:ring-blue-500 text-slate-700 font-mono text-lg"
                 />
-                <p className="text-gray-500 text-sm mt-1">لتلقي إشعار عند نداء رقمك</p>
               </div>
+            </div>
 
-              {/* Phone (Optional) */}
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">رقم الهاتف (اختياري)</label>
-                <input
-                  type="tel"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  placeholder="01001234567"
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-                <p className="text-gray-500 text-sm mt-1">لتلقي رسالة WhatsApp عند نداء رقمك</p>
-              </div>
+            <button 
+              onClick={handleStartTracking}
+              disabled={!selectedClinicId || !myTicketNumber}
+              className="w-full bg-blue-600 text-white py-4 rounded-xl font-bold hover:bg-blue-700 transition-transform active:scale-95 disabled:opacity-50 disabled:active:scale-100 flex items-center justify-center gap-2 shadow-lg shadow-blue-200"
+            >
+              <span>بدء المتابعة</span>
+              <ArrowRight className="w-5 h-5" />
+            </button>
 
-              {/* Submit Button */}
-              <button
-                type="submit"
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg transition-colors"
-              >
-                الحصول على تذكرة
-              </button>
-            </form>
+            <div className="bg-blue-50 p-4 rounded-xl flex items-start gap-3">
+               <Volume2 className="w-5 h-5 text-blue-600 shrink-0 mt-1" />
+               <p className="text-xs text-blue-800 leading-relaxed">
+                 عند تفعيل المتابعة، سيقوم هاتفك بإصدار تنبيه صوتي عندما يقترب دورك. يرجى إبقاء هذه الصفحة مفتوحة.
+               </p>
+            </div>
 
-            {/* Ticket Display */}
-            {ticketNumber && (
-              <div className="mt-8 p-6 bg-gradient-to-r from-green-50 to-blue-50 rounded-lg border-2 border-green-500">
-                <p className="text-center text-gray-600 mb-2">رقم التذكرة</p>
-                <p className="text-5xl font-bold text-center text-green-600">{toArabicNumbers(ticketNumber)}</p>
-                <p className="text-center text-gray-600 mt-4">يرجى الانتظار حتى يتم نداء رقمك</p>
-              </div>
-            )}
           </div>
+        )}
 
-          {/* Complaint Section */}
-          <div className="bg-white rounded-lg shadow-lg p-8">
-            <div className="flex items-center gap-3 mb-6">
-              <MessageSquare className="w-8 h-8 text-purple-600" />
-              <h2 className="text-2xl font-bold text-gray-800">الشكاوى والاقتراحات</h2>
+        {/* باقي العيادات (للاطلاع العام) */}
+        {!isTracking && (
+          <div className="mt-8">
+            <h3 className="text-lg font-bold text-slate-700 mb-4 px-2 border-r-4 border-blue-500 mr-2">حالة العيادات الآن</h3>
+            <div className="grid gap-3">
+              {clinics.map(clinic => (
+                <div key={clinic.id} className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex justify-between items-center">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-2 h-2 rounded-full ${clinic.is_active ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                    <span className="font-bold text-slate-700">{clinic.clinic_name}</span>
+                  </div>
+                  <div className="bg-slate-50 px-3 py-1 rounded-lg border border-slate-200">
+                    <span className="text-xs text-slate-400 ml-2">الدور:</span>
+                    <span className="font-black text-blue-600 text-lg">{toArabicNumbers(clinic.current_number)}</span>
+                  </div>
+                </div>
+              ))}
             </div>
-
-            {!showComplaintForm ? (
-              <button
-                onClick={() => setShowComplaintForm(true)}
-                className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 rounded-lg transition-colors"
-              >
-                تقديم شكوى أو اقتراح
-              </button>
-            ) : (
-              <form onSubmit={handleSubmitComplaint} className="space-y-6">
-                {/* Complaint Type */}
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">نوع الشكوى</label>
-                  <select
-                    value={complaintType}
-                    onChange={(e) => setComplaintType(e.target.value)}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
-                  >
-                    <option value="complaint">شكوى</option>
-                    <option value="suggestion">اقتراح</option>
-                  </select>
-                </div>
-
-                {/* Complaint Text */}
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">النص (140 حرف على الأقل)</label>
-                  <textarea
-                    value={complaintText}
-                    onChange={(e) => setComplaintText(e.target.value)}
-                    placeholder="أدخل الشكوى أو الاقتراح..."
-                    rows={4}
-                    maxLength={500}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
-                    required
-                  />
-                  <p className="text-gray-500 text-sm mt-1">{complaintText.length}/500</p>
-                </div>
-
-                {/* Buttons */}
-                <div className="flex gap-4">
-                  <button
-                    type="submit"
-                    className="flex-1 bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 rounded-lg transition-colors"
-                  >
-                    إرسال
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowComplaintForm(false);
-                      setComplaintText('');
-                    }}
-                    className="flex-1 bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-3 rounded-lg transition-colors"
-                  >
-                    إلغاء
-                  </button>
-                </div>
-              </form>
-            )}
           </div>
-        </div>
+        )}
 
-        {/* Quick Links */}
-        <div className="mt-12 grid grid-cols-1 md:grid-cols-3 gap-6">
-          <Link href="/appointment">
-            <div className="bg-white rounded-lg shadow-lg p-6 hover:shadow-xl transition-shadow cursor-pointer text-center">
-              <h3 className="text-xl font-bold text-gray-800 mb-2">حجز موعد</h3>
-              <p className="text-gray-600">احجز موعداً في العيادة</p>
-            </div>
-          </Link>
-
-          <Link href="/consultation">
-            <div className="bg-white rounded-lg shadow-lg p-6 hover:shadow-xl transition-shadow cursor-pointer text-center">
-              <h3 className="text-xl font-bold text-gray-800 mb-2">استشارة طبية</h3>
-              <p className="text-gray-600">اطلب استشارة من الطبيب</p>
-            </div>
-          </Link>
-
-          <Link href="/calculators">
-            <div className="bg-white rounded-lg shadow-lg p-6 hover:shadow-xl transition-shadow cursor-pointer text-center">
-              <h3 className="text-xl font-bold text-gray-800 mb-2">حاسبات طبية</h3>
-              <p className="text-gray-600">استخدم الأدوات الطبية</p>
-            </div>
-          </Link>
-        </div>
-      </div>
+      </main>
     </div>
   );
 }
