@@ -11,7 +11,6 @@ import {
 } from 'lucide-react';
 import { toArabicNumbers, getArabicDate, getArabicTime, playSequentialAudio, playAudio } from '@/lib/utils'; 
 
-// --- إعدادات الفيديو (Static / Local) ---
 const PATH_PREFIX = '/videos'; 
 const VIDEOS_COUNT = 28; 
 
@@ -36,21 +35,18 @@ export default function DisplayScreen() {
   const [isZoomed, setIsZoomed] = useState(false);
   const [currentDoctorIndex, setCurrentDoctorIndex] = useState(0);
   
-  // --- إعدادات العرض المتقدمة (Expanded) ---
   const [showDisplaySettings, setShowDisplaySettings] = useState(false);
   const [displayConfig, setDisplayConfig] = useState({
-    aspectRatio: 'aspect-[3/2]', // نسبة العرض للارتفاع
-    gridCols: 2,                 // عدد الأعمدة
-    textSize: 'normal',          // حجم الخط (xs, sm, normal, lg, xl)
-    gapSize: 'normal'            // المسافة بين الكروت
+    aspectRatio: 'aspect-[3/2]', 
+    gridCols: 2,                 
+    textSize: 'normal',          
+    gapSize: 'normal'            
   });
 
-  // Video State
   const [currentVideoIndex, setCurrentVideoIndex] = useState(0);
   const [videoError, setVideoError] = useState<string | null>(null); 
   const videoRef = useRef<HTMLVideoElement>(null);
 
-  // Notification State
   const [notification, setNotification] = useState<{ 
     show: boolean; 
     message: string; 
@@ -102,7 +98,6 @@ export default function DisplayScreen() {
   useEffect(() => {
     if (!isAuthenticated) return;
     
-    // 1. الاستماع للطوارئ
     const queueChannel = supabase.channel('display-queue')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'queue', filter: 'is_emergency=eq.true' }, (payload) => { 
           const clinicName = clinics.find(c => c.id === payload.new.clinic_id)?.clinic_name || 'العيادة'; 
@@ -110,21 +105,38 @@ export default function DisplayScreen() {
       })
       .subscribe();
 
-    // 2. الاستماع للتنبيهات (تحويل + نداء بالاسم + رسائل)
     const alertChannel = supabase.channel('control-alerts')
       .on('broadcast', { event: 'clinic-transfer' }, (payload) => { 
           triggerTransferAlert(payload.payload); 
       })
-      // +++ استقبال نداء الاسم +++
       .on('broadcast', { event: 'name-alert' }, (payload) => {
         setNotification({
           show: true,
           message: `نداء للعميل: ${payload.payload.name} - ${payload.payload.clinicName}`,
           type: 'normal'
         });
-        // تشغيل صوت Ding فقط
         if (!isMuted) playAudio('/audio/ding.mp3').catch(console.error);
         setTimeout(() => setNotification(null), 10000);
+      })
+      // +++ جديد: تشغيل الملفات الجاهزة +++
+      .on('broadcast', { event: 'play-instant' }, (payload) => {
+        if (!isMuted && payload.payload.file) {
+          playAudio(`/audio/${payload.payload.file}`).catch(console.error);
+        }
+      })
+      // +++ جديد: تشغيل الصوت المباشر (المسجل) +++
+      .on('broadcast', { event: 'voice-broadcast' }, (payload) => {
+        if (!isMuted && payload.payload.audioData) {
+          // تشغيل تنبيه أولاً
+          playAudio('/audio/ding.mp3').then(() => {
+             // ثم تشغيل الصوت المسجل
+             const audio = new Audio(payload.payload.audioData);
+             audio.play().catch(console.error);
+          }).catch(console.error);
+          
+          setNotification({ show: true, message: '🎙️ تنبيه صوتي من الإدارة', type: 'normal' });
+          setTimeout(() => setNotification(null), 10000);
+        }
       })
       .subscribe();
 
@@ -141,7 +153,6 @@ export default function DisplayScreen() {
     clinics.forEach((clinic) => {
       const prevClinic = prevClinicsRef.current.find((c) => c.id === clinic.id);
       if (prevClinic && clinic.last_call_time !== prevClinic.last_call_time && clinic.last_call_time) { 
-          // نتأكد ألا يقاطع تنبيه الطوارئ
           if (notification?.type !== 'emergency') { 
               triggerAlert(clinic); 
           } 
@@ -178,8 +189,8 @@ export default function DisplayScreen() {
       case 'xs': return { name: 'text-lg', number: 'text-5xl', meta: 'text-sm' };
       case 'small': return { name: 'text-xl', number: 'text-6xl', meta: 'text-base' };
       case 'large': return { name: 'text-4xl', number: 'text-9xl', meta: 'text-xl' };
-      case 'xl': return { name: 'text-5xl', number: 'text-[10rem]', meta: 'text-2xl' }; // ضخم
-      default: return { name: 'text-3xl', number: 'text-8xl', meta: 'text-lg' }; // Normal
+      case 'xl': return { name: 'text-5xl', number: 'text-[10rem]', meta: 'text-2xl' }; 
+      default: return { name: 'text-3xl', number: 'text-8xl', meta: 'text-lg' }; 
     }
   };
   const textSizes = getTextSizes();
@@ -231,15 +242,8 @@ export default function DisplayScreen() {
         </div>
         <div className="flex items-center gap-3">
           
-          {/* Controls Group */}
           <div className="flex bg-slate-700 rounded-lg p-1 gap-1 relative">
-             <button 
-                onClick={() => setShowDisplaySettings(!showDisplaySettings)} 
-                className={`p-3 rounded transition-colors ${showDisplaySettings ? 'bg-blue-600 text-white' : 'hover:bg-slate-600 text-slate-300'}`}
-                title="إعدادات التنسيق"
-             >
-               <Settings2 className="w-6 h-6"/>
-             </button>
+             <button onClick={() => setShowDisplaySettings(!showDisplaySettings)} className={`p-3 rounded transition-colors ${showDisplaySettings ? 'bg-blue-600 text-white' : 'hover:bg-slate-600 text-slate-300'}`} title="إعدادات التنسيق"> <Settings2 className="w-6 h-6"/> </button>
              <div className="w-[1px] bg-slate-600 mx-1"></div>
              <select value={selectedScreen} onChange={(e) => setSelectedScreen(parseInt(e.target.value))} className="px-4 py-2 bg-slate-800 text-white rounded-md border-none outline-none font-bold cursor-pointer hover:bg-slate-600 transition-colors">
                {[1, 2, 3, 4, 5].map((num) => <option key={num} value={num}>شاشة {toArabicNumbers(num)}</option>)}
@@ -251,34 +255,19 @@ export default function DisplayScreen() {
           </div>
         </div>
 
-        {/* --- Display Settings Panel (Advanced) --- */}
         {showDisplaySettings && (
           <div className="absolute top-24 left-8 bg-slate-800/95 backdrop-blur-md border border-slate-600 rounded-xl p-6 shadow-2xl z-50 w-96 animate-in fade-in slide-in-from-top-4">
-             <h3 className="text-white font-bold mb-4 flex items-center gap-2 border-b border-slate-600 pb-2">
-               <Settings2 className="w-5 h-5 text-blue-400"/> تخصيص العرض
-             </h3>
-             
-             {/* 1. Grid & Gap */}
+             <h3 className="text-white font-bold mb-4 flex items-center gap-2 border-b border-slate-600 pb-2"> <Settings2 className="w-5 h-5 text-blue-400"/> تخصيص العرض </h3>
              <div className="mb-4 grid grid-cols-2 gap-4">
                <div>
                   <label className="text-slate-400 text-xs mb-2 block flex items-center gap-2"><LayoutGrid className="w-3 h-3"/> الأعمدة</label>
-                  <div className="flex gap-1">
-                    {[1, 2, 3].map(cols => (
-                      <button key={cols} onClick={() => setDisplayConfig({...displayConfig, gridCols: cols})} className={`flex-1 py-1 text-sm rounded border ${displayConfig.gridCols === cols ? 'bg-blue-600 border-blue-500' : 'bg-slate-700 border-slate-600'}`}>{cols}</button>
-                    ))}
-                  </div>
+                  <div className="flex gap-1"> {[1, 2, 3].map(cols => ( <button key={cols} onClick={() => setDisplayConfig({...displayConfig, gridCols: cols})} className={`flex-1 py-1 text-sm rounded border ${displayConfig.gridCols === cols ? 'bg-blue-600 border-blue-500' : 'bg-slate-700 border-slate-600'}`}>{cols}</button> ))} </div>
                </div>
                <div>
                   <label className="text-slate-400 text-xs mb-2 block flex items-center gap-2"><MoveHorizontal className="w-3 h-3"/> المسافات</label>
-                  <div className="flex gap-1">
-                    {['small', 'normal', 'large'].map(gap => (
-                      <button key={gap} onClick={() => setDisplayConfig({...displayConfig, gapSize: gap})} className={`flex-1 py-1 text-xs rounded border ${displayConfig.gapSize === gap ? 'bg-blue-600 border-blue-500' : 'bg-slate-700 border-slate-600'}`}>{gap === 'small' ? 'S' : gap === 'normal' ? 'M' : 'L'}</button>
-                    ))}
-                  </div>
+                  <div className="flex gap-1"> {['small', 'normal', 'large'].map(gap => ( <button key={gap} onClick={() => setDisplayConfig({...displayConfig, gapSize: gap})} className={`flex-1 py-1 text-xs rounded border ${displayConfig.gapSize === gap ? 'bg-blue-600 border-blue-500' : 'bg-slate-700 border-slate-600'}`}>{gap === 'small' ? 'S' : gap === 'normal' ? 'M' : 'L'}</button> ))} </div>
                </div>
              </div>
-
-             {/* 2. Aspect Ratio */}
              <div className="mb-4">
                <label className="text-slate-400 text-xs mb-2 block flex items-center gap-2"><Monitor className="w-3 h-3"/> أبعاد الكروت</label>
                <div className="grid grid-cols-4 gap-1">
@@ -288,14 +277,10 @@ export default function DisplayScreen() {
                  <button onClick={() => setDisplayConfig({...displayConfig, aspectRatio: 'aspect-video'})} className={`text-[10px] py-2 rounded border ${displayConfig.aspectRatio === 'aspect-video' ? 'bg-blue-600 border-blue-500' : 'bg-slate-700 border-slate-600'}`}>عريض 16:9</button>
                </div>
              </div>
-
-             {/* 3. Text Size */}
              <div>
                <label className="text-slate-400 text-xs mb-2 block flex items-center gap-2"><Type className="w-3 h-3"/> حجم الخطوط</label>
                <div className="grid grid-cols-5 gap-1">
-                 {['xs', 'small', 'normal', 'large', 'xl'].map(size => (
-                   <button key={size} onClick={() => setDisplayConfig({...displayConfig, textSize: size})} className={`text-[10px] py-2 rounded border ${displayConfig.textSize === size ? 'bg-blue-600 border-blue-500' : 'bg-slate-700 border-slate-600'}`}>{size.toUpperCase()}</button>
-                 ))}
+                 {['xs', 'small', 'normal', 'large', 'xl'].map(size => ( <button key={size} onClick={() => setDisplayConfig({...displayConfig, textSize: size})} className={`text-[10px] py-2 rounded border ${displayConfig.textSize === size ? 'bg-blue-600 border-blue-500' : 'bg-slate-700 border-slate-600'}`}>{size.toUpperCase()}</button> ))}
                </div>
              </div>
           </div>
@@ -305,109 +290,43 @@ export default function DisplayScreen() {
       {/* Main Layout */}
       <div className="flex-1 flex overflow-hidden">
         
-        {/* --- Left Column: Clinics & Doctors --- */}
+        {/* --- Left Column --- */}
         <div className={`${isZoomed ? 'w-1/2' : 'w-1/3'} flex flex-col border-l border-slate-700 transition-all duration-500 ease-in-out`}>
-          
-          {/* A. Clinics List (Fully Dynamic) */}
           <div className="flex-1 bg-slate-100/5 backdrop-blur-sm p-4 overflow-y-auto custom-scrollbar">
             <div className={`grid ${getGridClass()} ${getGapClass()}`}>
               {screenClinics.map((clinic) => (
-                <div key={clinic.id} className={`
-                    relative overflow-hidden rounded-xl border transition-all duration-300 shadow-lg 
-                    ${displayConfig.aspectRatio} flex flex-col justify-between
-                    ${notification?.targetClinicId === clinic.id ? 'animate-flash z-10 scale-105' : ''} 
-                    ${clinic.is_active ? 'bg-white border-blue-100' : 'bg-slate-200 border-slate-300 opacity-60 grayscale'}
-                  `}>
+                <div key={clinic.id} className={`relative overflow-hidden rounded-xl border transition-all duration-300 shadow-lg ${displayConfig.aspectRatio} flex flex-col justify-between ${notification?.targetClinicId === clinic.id ? 'animate-flash z-10 scale-105' : ''} ${clinic.is_active ? 'bg-white border-blue-100' : 'bg-slate-200 border-slate-300 opacity-60 grayscale'}`}>
                   <div className={`absolute right-0 top-0 bottom-0 w-3 ${clinic.is_active ? 'bg-blue-600' : 'bg-slate-400'}`}></div>
-                  
                   <div className="p-4 flex-1 flex flex-col justify-between">
-                    {/* اسم العيادة */}
-                    <div className="mb-2">
-                      <h3 className={`font-bold leading-tight ${textSizes.name} ${clinic.is_active ? 'text-slate-800' : 'text-slate-600'}`}>
-                        {clinic.clinic_name}
-                      </h3>
-                    </div>
-
-                    {/* الرقم */}
-                    <div className="flex justify-center items-center flex-1">
-                       <span className={`font-black tracking-tighter ${textSizes.number} ${clinic.is_active ? 'text-blue-600' : 'text-slate-500'}`}>
-                         {toArabicNumbers(clinic.current_number)}
-                       </span>
-                    </div>
-
-                    {/* الحالة والتوقيت */}
+                    <div className="mb-2"><h3 className={`font-bold leading-tight ${textSizes.name} ${clinic.is_active ? 'text-slate-800' : 'text-slate-600'}`}>{clinic.clinic_name}</h3></div>
+                    <div className="flex justify-center items-center flex-1"><span className={`font-black tracking-tighter ${textSizes.number} ${clinic.is_active ? 'text-blue-600' : 'text-slate-500'}`}>{toArabicNumbers(clinic.current_number)}</span></div>
                     <div className="flex justify-between items-center border-t border-slate-100 pt-3 mt-2">
-                      <div className="flex items-center">
-                         {clinic.is_active ? 
-                           <span className={`text-green-700 bg-green-100 px-2 py-1 rounded font-bold flex items-center gap-1 ${textSizes.meta}`}><Activity className="w-4 h-4"/> نشطة</span> : 
-                           <span className={`text-slate-600 bg-slate-300 px-2 py-1 rounded font-bold flex items-center gap-1 ${textSizes.meta}`}><Ban className="w-4 h-4"/> متوقفة</span>
-                         }
-                      </div>
-                      <div className={`flex items-center gap-1 text-slate-500 font-mono font-bold ${textSizes.meta}`}>
-                         <Clock className="w-5 h-5" />
-                         <span>{clinic.last_call_time ? new Date(clinic.last_call_time).toLocaleTimeString('ar-EG', {hour: '2-digit', minute:'2-digit'}) : '--:--'}</span>
-                      </div>
+                      <div className="flex items-center">{clinic.is_active ? <span className={`text-green-700 bg-green-100 px-2 py-1 rounded font-bold flex items-center gap-1 ${textSizes.meta}`}><Activity className="w-4 h-4"/> نشطة</span> : <span className={`text-slate-600 bg-slate-300 px-2 py-1 rounded font-bold flex items-center gap-1 ${textSizes.meta}`}><Ban className="w-4 h-4"/> متوقفة</span>}</div>
+                      <div className={`flex items-center gap-1 text-slate-500 font-mono font-bold ${textSizes.meta}`}><Clock className="w-5 h-5" /><span>{clinic.last_call_time ? new Date(clinic.last_call_time).toLocaleTimeString('ar-EG', {hour: '2-digit', minute:'2-digit'}) : '--:--'}</span></div>
                     </div>
                   </div>
                 </div>
               ))}
             </div>
           </div>
-
-          {/* B. Doctor Rotator */}
           <div className="h-56 bg-gradient-to-r from-slate-900 to-slate-800 border-t-4 border-slate-700 relative overflow-hidden shrink-0 flex flex-col">
-             <div className="absolute top-0 right-0 z-20">
-                <div className="bg-blue-600 text-white px-6 py-1 rounded-bl-xl shadow-lg font-bold text-lg flex items-center gap-2">
-                  <Users className="w-5 h-5 text-blue-200" />
-                  فريق مقدمي الخدمة
-                </div>
-             </div>
-
+             <div className="absolute top-0 right-0 z-20"><div className="bg-blue-600 text-white px-6 py-1 rounded-bl-xl shadow-lg font-bold text-lg flex items-center gap-2"><Users className="w-5 h-5 text-blue-200" />فريق مقدمي الخدمة</div></div>
              {doctors.length > 0 && currentDoctor ? (
                <div key={currentDoctor.id} className="h-full flex items-center p-6 pt-8 animate-slide-in-right">
-                 <div className="w-32 h-32 rounded-full border-4 border-blue-500 overflow-hidden shadow-2xl flex-shrink-0 bg-white flex items-center justify-center text-slate-400 relative z-10">
-                    {(currentDoctor as any).image_url ? (
-                      <img src={(currentDoctor as any).image_url} alt={currentDoctor.full_name} className="w-full h-full object-cover" />
-                    ) : (
-                      <User className="w-16 h-16" />
-                    )}
-                 </div>
-                 
-                 <div className="mr-6 flex-1 relative z-10 mt-4">
-                    <h2 className="text-3xl font-bold text-white mb-2 drop-shadow-md">{currentDoctor.full_name}</h2>
-                    <p className="text-xl text-blue-300 flex items-center gap-2"><Activity className="w-5 h-5"/>{currentDoctor.specialization}</p>
-                 </div>
+                 <div className="w-32 h-32 rounded-full border-4 border-blue-500 overflow-hidden shadow-2xl flex-shrink-0 bg-white flex items-center justify-center text-slate-400 relative z-10">{(currentDoctor as any).image_url ? (<img src={(currentDoctor as any).image_url} alt={currentDoctor.full_name} className="w-full h-full object-cover" />) : (<User className="w-16 h-16" />)}</div>
+                 <div className="mr-6 flex-1 relative z-10 mt-4"><h2 className="text-3xl font-bold text-white mb-2 drop-shadow-md">{currentDoctor.full_name}</h2><p className="text-xl text-blue-300 flex items-center gap-2"><Activity className="w-5 h-5"/>{currentDoctor.specialization}</p></div>
                  <User className="absolute -left-6 -bottom-6 w-48 h-48 text-white/5 rotate-12 z-0" />
                </div>
              ) : <div className="h-full flex items-center justify-center text-slate-500"><p>جاري تحميل بيانات الأطباء...</p></div>}
           </div>
-
         </div>
 
-        {/* Right Column: Video */}
+        {/* --- Right Column: Video --- */}
         <div className={`${isZoomed ? 'w-1/2' : 'w-2/3'} bg-black transition-all duration-500 ease-in-out relative border-r border-slate-800 flex items-center justify-center`}>
            {LOCAL_VIDEOS.length > 0 ? (
              <>
-               <video
-                 ref={videoRef}
-                 className="w-full h-full object-contain"
-                 muted={isMuted}
-                 controls 
-                 playsInline
-                 src={LOCAL_VIDEOS[currentVideoIndex]}
-                 onEnded={handleVideoEnded}
-                 onError={handleVideoError}
-               />
-               
-               {videoError && (
-                 <div className="absolute inset-0 flex items-center justify-center bg-black/80 z-50">
-                   <div className="bg-red-900/80 p-6 rounded-xl border border-red-500 text-white text-center max-w-lg">
-                     <h3 className="text-xl font-bold mb-2">تنبيه فيديو</h3>
-                     <p className="text-sm mb-4">تعذر تشغيل الفيديو، يتم الانتقال للتالي...</p>
-                     <p dir="ltr" className="font-mono text-xs text-white/50">{videoError}</p>
-                   </div>
-                 </div>
-               )}
+               <video ref={videoRef} className="w-full h-full object-contain" muted={isMuted} controls playsInline src={LOCAL_VIDEOS[currentVideoIndex]} onEnded={handleVideoEnded} onError={handleVideoError} />
+               {videoError && (<div className="absolute inset-0 flex items-center justify-center bg-black/80 z-50"><div className="bg-red-900/80 p-6 rounded-xl border border-red-500 text-white text-center max-w-lg"><h3 className="text-xl font-bold mb-2">تنبيه فيديو</h3><p className="text-sm mb-4">تعذر تشغيل الفيديو...</p></div></div>)}
              </>
            ) : <div className="text-white text-xl">لا توجد فيديوهات للعرض</div>}
         </div>
