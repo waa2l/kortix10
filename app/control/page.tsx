@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useClinics, useQueue } from '@/lib/hooks';
 import { supabase } from '@/lib/supabase';
-import { Lock, LogOut, Play, RotateCcw, AlertTriangle, Send, Pause, Bell, MessageSquare, X, ArrowRightLeft, Clock, User, Mic } from 'lucide-react';
+import { Lock, LogOut, Play, RotateCcw, AlertTriangle, Send, Pause, Bell, MessageSquare, X, ArrowRightLeft, Clock, Mic, StopCircle } from 'lucide-react';
 import { toArabicNumbers, playSequentialAudio, getArabicDate, getArabicTime, playAudio } from '@/lib/utils';
 
 export default function ControlPanel() {
@@ -27,8 +27,12 @@ export default function ControlPanel() {
   
   // Inputs State
   const [specialCallNumber, setSpecialCallNumber] = useState('');
-  const [patientName, setPatientName] = useState(''); // حالة جديدة لاسم العميل
+  const [patientName, setPatientName] = useState(''); 
   
+  // Emergency Loop State
+  const [isEmergencyActive, setIsEmergencyActive] = useState(false);
+  const emergencyAudioRef = useRef<HTMLAudioElement | null>(null);
+
   // Modals State
   const [showMsgModal, setShowMsgModal] = useState(false);
   const [showTransferModal, setShowTransferModal] = useState(false);
@@ -38,47 +42,19 @@ export default function ControlPanel() {
   const [msgContent, setMsgContent] = useState('');
   const [transferTargetClinic, setTransferTargetClinic] = useState('');
 
-  // Refs
   const prevClinicsRef = useRef<typeof clinics>([]);
 
   useEffect(() => {
     setIsClient(true);
   }, []);
 
-  // Time Updater
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
 
-  // --- Realtime Logic (Listening) ---
-  // هذا الجزء يضمن تشغيل الصوت عندما تتحدث البيانات القادمة من السيرفر
-  useEffect(() => {
-    if (!isAuthenticated || clinicsLoading) return;
-
-    clinics.forEach((clinic) => {
-      const prevClinic = prevClinicsRef.current.find((c) => c.id === clinic.id);
-      
-      // إذا تغير وقت آخر نداء، نقوم بتشغيل الصوت
-      if (prevClinic && clinic.last_call_time !== prevClinic.last_call_time && clinic.last_call_time) {
-        const callTime = new Date(clinic.last_call_time).getTime();
-        const now = new Date().getTime();
-        
-        // التحقق أن النداء حديث (أقل من 5 ثواني) لتجنب تشغيل الصوت عند تحميل الصفحة
-        if (now - callTime < 5000) {
-          triggerControlAlert(
-            `تم نداء رقم ${toArabicNumbers(clinic.current_number)} - ${clinic.clinic_name}`,
-            'normal',
-            // مصفوفة الصوت: Ding + الرقم + العيادة
-            ['/audio/ding.mp3', `/audio/${clinic.current_number}.mp3`, `/audio/clinic${clinic.clinic_number}.mp3`]
-          );
-        }
-      }
-    });
-
-    prevClinicsRef.current = clinics;
-  }, [clinics, isAuthenticated]);
-
+  // --- Realtime Logic ---
+  // تم تبسيط هذا الجزء ليستمع فقط للرسائل الخارجية، لأن الأزرار ستقوم بتشغيل الصوت محلياً
   useEffect(() => {
     if (!isAuthenticated) return;
 
@@ -94,15 +70,6 @@ export default function ControlPanel() {
           );
         }
       })
-      .on('broadcast', { event: 'clinic-transfer' }, (payload) => {
-        if (payload.payload.fromClinicId === selectedClinic || payload.payload.toClinicId === selectedClinic) {
-           triggerControlAlert(
-            `تحويل العميل ${toArabicNumbers(payload.payload.ticketNumber)} إلى ${payload.payload.toClinicName}`,
-            'transfer',
-            ['/audio/ding.mp3']
-          );
-        }
-      })
       .subscribe();
 
     return () => {
@@ -111,12 +78,21 @@ export default function ControlPanel() {
   }, [selectedClinic, isAuthenticated]);
 
 
-  // دالة التنبيه الموحدة وتشغيل الصوت
+  // دالة مساعدة لتجهيز ملفات الصوت للجملة الكاملة
+  const getFullAudioFiles = (ticketNumber: number, clinicNumber: number) => {
+    return [
+      '/audio/ding.mp3', 
+      `/audio/${ticketNumber}.mp3`, 
+      `/audio/clinic${clinicNumber}.mp3`
+    ];
+  };
+
+  // دالة التنبيه الموحدة
   const triggerControlAlert = async (message: string, type: 'normal' | 'emergency' | 'message' | 'transfer' = 'normal', audioFiles: string[] = []) => {
     setNotification({ show: true, message, type });
     setTimeout(() => setNotification(null), 3000);
 
-    // تشغيل الصوت هنا في صفحة التحكم
+    // تشغيل الصوت فوراً
     if (audioFiles.length > 0) {
       try {
         await playSequentialAudio(audioFiles);
@@ -124,89 +100,114 @@ export default function ControlPanel() {
     }
   };
 
-  // --- Handlers (With Feedback) ---
+  // --- Handlers ---
 
-  // 1. النداء العادي
+  // 1. العميل التالي (تم التعديل: ينطق الجملة كاملة)
   const handleNextPatient = async () => {
     const clinic = clinics.find((c) => c.id === selectedClinic);
     if (clinic && clinic.is_active) {
+      const nextNumber = clinic.current_number + 1;
       try {
+        // تحديث قاعدة البيانات
         await updateClinic(clinic.id, { 
-          current_number: clinic.current_number + 1,
+          current_number: nextNumber,
           last_call_time: new Date().toISOString()
         });
-        // الصوت سيتم تشغيله تلقائياً عبر الـ useEffect عند تحديث البيانات
+        
+        // نطق الجملة كاملة محلياً
+        triggerControlAlert(
+          `تم نداء رقم ${toArabicNumbers(nextNumber)}`, 
+          'normal', 
+          getFullAudioFiles(nextNumber, clinic.clinic_number)
+        );
+
       } catch (err) { triggerControlAlert('فشل التحديث', 'normal', ['/audio/ding.mp3']); }
     } else {
       triggerControlAlert('العيادة متوقفة حالياً', 'normal', ['/audio/ding.mp3']);
     }
   };
 
-  // 2. السابق
+  // 2. العميل السابق (تم التعديل: ينطق الجملة كاملة بدلاً من ding فقط)
   const handlePreviousPatient = async () => {
     const clinic = clinics.find((c) => c.id === selectedClinic);
     if (clinic && clinic.current_number > 0) {
+      const prevNumber = clinic.current_number - 1;
       try {
         await updateClinic(clinic.id, { 
-          current_number: clinic.current_number - 1 
+          current_number: prevNumber 
         });
-        triggerControlAlert('تم الرجوع للعميل السابق', 'normal', ['/audio/ding.mp3']);
+        
+        // نطق الجملة كاملة
+        triggerControlAlert(
+          `تم الرجوع لرقم ${toArabicNumbers(prevNumber)}`, 
+          'normal', 
+          getFullAudioFiles(prevNumber, clinic.clinic_number)
+        );
       } catch (err) { alert('فشل التحديث'); }
     }
   };
 
-  // 3. تكرار النداء
+  // 3. تكرار النداء (تم التعديل: ينطق الجملة كاملة)
   const handleRepeatCall = async () => {
     const clinic = clinics.find((c) => c.id === selectedClinic);
     if (clinic && clinic.current_number > 0) {
        try {
          await updateClinic(clinic.id, { last_call_time: new Date().toISOString() });
-         // الصوت يعمل تلقائياً
+         
+         // نطق الجملة كاملة
+         triggerControlAlert(
+            `تكرار نداء رقم ${toArabicNumbers(clinic.current_number)}`, 
+            'normal', 
+            getFullAudioFiles(clinic.current_number, clinic.clinic_number)
+         );
        } catch (err) { alert('فشل التحديث'); }
     }
   };
 
-  // 4. نداء خاص (برقم)
+  // 4. نداء برقم محدد (تم التعديل: ينطق الجملة كاملة)
   const handleSpecialCall = async () => {
     if (!specialCallNumber) return;
+    const targetNum = parseInt(specialCallNumber);
     const clinic = clinics.find((c) => c.id === selectedClinic);
     if (clinic) {
       try {
         await updateClinic(clinic.id, { 
-          current_number: parseInt(specialCallNumber),
+          current_number: targetNum,
           last_call_time: new Date().toISOString()
         });
+        
+        // نطق الجملة كاملة
+        triggerControlAlert(
+            `نداء خاص لرقم ${toArabicNumbers(targetNum)}`, 
+            'normal', 
+            getFullAudioFiles(targetNum, clinic.clinic_number)
+        );
         setSpecialCallNumber('');
       } catch (err) { alert('فشل النداء الخاص'); }
     }
   };
 
-  // 5. نداء بالاسم (الخاصية الجديدة)
+  // 5. نداء باسم (ding فقط كما هو)
   const handleNameAlert = async () => {
     if (!patientName) return;
     const clinic = clinics.find(c => c.id === selectedClinic);
     
     try {
-      // إرسال برودكاست لشاشة العرض
       const channel = supabase.channel('control-alerts');
       await channel.send({
         type: 'broadcast',
-        event: 'name-alert', // حدث جديد سنستقبله في شاشة العرض
+        event: 'name-alert',
         payload: {
           name: patientName,
           clinicName: clinic?.clinic_name || 'العيادة'
         }
       });
-
-      // تشغيل الصوت Ding فقط هنا في صفحة التحكم
       triggerControlAlert(`جاري نداء: ${patientName}`, 'normal', ['/audio/ding.mp3']);
-      
-      setPatientName(''); // تفريغ الحقل
-    } catch (err) {
-      alert('فشل الإرسال');
-    }
+      setPatientName(''); 
+    } catch (err) { alert('فشل الإرسال'); }
   };
 
+  // 6. التحويل (تم التعديل: نطق ding)
   const handleTransferCurrent = async () => {
     if (!transferTargetClinic) return;
     const currentClinic = clinics.find(c => c.id === selectedClinic);
@@ -226,19 +227,39 @@ export default function ControlPanel() {
             toClinicNumber: targetClinicObj.clinic_number
           }
         });
+        
+        // تشغيل صوت تأكيد التحويل
+        triggerControlAlert(
+            `تم التحويل إلى ${targetClinicObj.clinic_name}`, 
+            'transfer', 
+            ['/audio/ding.mp3']
+        );
+        
         setShowTransferModal(false);
         setTransferTargetClinic('');
-      } catch (err) {
-        alert('فشل التحويل');
-      }
+      } catch (err) { alert('فشل التحويل'); }
     }
   };
 
-  const handleEmergency = async () => {
+  // 7. الطوارئ (تم التعديل: تشغيل مستمر Loop)
+  const handleEmergencyToggle = async () => {
+    // إذا كانت الطوارئ تعمل بالفعل -> إيقاف
+    if (isEmergencyActive) {
+      if (emergencyAudioRef.current) {
+        emergencyAudioRef.current.pause();
+        emergencyAudioRef.current.currentTime = 0;
+      }
+      setIsEmergencyActive(false);
+      setNotification(null);
+      return;
+    }
+
+    // إذا كانت الطوارئ متوقفة -> تشغيل
     if (confirm('تأكيد نداء الطوارئ؟')) {
       const clinic = clinics.find((c) => c.id === selectedClinic);
       if (clinic) {
         try {
+          // إرسال للشاشة
           await addToQueue({
             clinic_id: clinic.id,
             ticket_number: clinic.current_number, 
@@ -248,12 +269,30 @@ export default function ControlPanel() {
             called_at: new Date().toISOString(),
             completed_at: null
           });
-          // تشغيل صوت الطوارئ في التحكم
-          triggerControlAlert('تم إطلاق نداء الطوارئ!', 'emergency', ['/audio/emergency.mp3']);
+
+          // تشغيل الصوت Loop محلياً
+          setIsEmergencyActive(true);
+          setNotification({ show: true, message: '⚠️ نداء الطوارئ مفعل ⚠️', type: 'emergency' });
+          
+          if (!emergencyAudioRef.current) {
+            emergencyAudioRef.current = new Audio('/audio/emergency.mp3');
+            emergencyAudioRef.current.loop = true; // تفعيل التكرار
+          }
+          emergencyAudioRef.current.play().catch(e => console.error("Emergency play error", e));
+
         } catch (err) { alert('فشل إرسال نداء الطوارئ'); }
       }
     }
   };
+
+  // تنظيف صوت الطوارئ عند الخروج من الصفحة
+  useEffect(() => {
+    return () => {
+      if (emergencyAudioRef.current) {
+        emergencyAudioRef.current.pause();
+      }
+    };
+  }, []);
 
   const handleSendTextAlert = async () => {
     if (!msgTargetClinic || !msgContent) return;
@@ -339,7 +378,7 @@ export default function ControlPanel() {
   return (
     <div className="min-h-screen bg-gray-900 text-white p-6 relative font-cairo overflow-hidden">
       
-      {/* Header with Date/Time */}
+      {/* Header */}
       <div className="flex flex-col md:flex-row items-center justify-between mb-8 bg-gray-800 p-4 rounded-xl border border-gray-700">
         <div className="flex items-center gap-4">
           <div className="text-right">
@@ -379,6 +418,7 @@ export default function ControlPanel() {
 
       {/* Grid Buttons */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+        
         <button onClick={handleNextPatient} disabled={!clinic?.is_active} className="bg-green-600 hover:bg-green-700 disabled:opacity-50 p-8 rounded-xl flex flex-col items-center gap-3 shadow-lg border-b-4 border-green-800 transition-transform active:scale-95">
           <Play className="w-12 h-12" />
           <span className="text-2xl font-bold">العميل التالي</span>
@@ -409,10 +449,15 @@ export default function ControlPanel() {
           <span className="text-2xl font-bold">تصفير العداد</span>
         </button>
 
-        <button onClick={handleEmergency} className="bg-red-600 hover:bg-red-700 p-8 rounded-xl flex flex-col items-center gap-3 shadow-lg border-b-4 border-red-800 animate-pulse-glow col-span-1 md:col-span-2 lg:col-span-3">
-          <AlertTriangle className="w-12 h-12" />
-          <span className="text-2xl font-bold">نداء طوارئ</span>
+        {/* Emergency Toggle Button */}
+        <button 
+            onClick={handleEmergencyToggle} 
+            className={`${isEmergencyActive ? 'bg-gray-700 hover:bg-gray-600 border-gray-900' : 'bg-red-600 hover:bg-red-700 border-red-800'} p-8 rounded-xl flex flex-col items-center gap-3 shadow-lg border-b-4 transition-transform active:scale-95 col-span-1 md:col-span-2 lg:col-span-3 ${isEmergencyActive ? '' : 'animate-pulse-glow'}`}
+        >
+          {isEmergencyActive ? <StopCircle className="w-12 h-12 text-red-500" /> : <AlertTriangle className="w-12 h-12" />}
+          <span className="text-2xl font-bold">{isEmergencyActive ? 'إيقاف صوت الطوارئ' : 'نداء طوارئ'}</span>
         </button>
+
       </div>
 
       {/* Extra Tools Section */}
@@ -456,7 +501,7 @@ export default function ControlPanel() {
 
       </div>
 
-      {/* Modals (Msg & Transfer) */}
+      {/* Modals */}
       {showMsgModal && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[100]">
           <div className="bg-gray-800 p-8 rounded-2xl w-full max-w-lg border border-gray-700 relative">
