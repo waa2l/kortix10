@@ -3,38 +3,32 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
-export default function ProtectedLayout({ children }: { children: React.ReactNode }) {
+export default function ProtectedDoctorLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [isAuthorized, setIsAuthorized] = useState(false);
 
   useEffect(() => {
-    // 1. قراءة البيانات
+    // محاولة قراءة البيانات
     const doctorData = localStorage.getItem('doctorData');
 
-    // 2. التحقق
     if (!doctorData) {
-      // لا توجد بيانات؟ اطرد المستخدم فوراً لصفحة الدخول
+      // لا توجد بيانات -> اطرد المستخدم لصفحة الدخول فوراً
       router.replace('/doctor/login');
     } else {
-      // توجد بيانات؟ تأكد أنها صالحة (اختياري لكن مفضل)
-      try {
-        const parsed = JSON.parse(doctorData);
-        if (parsed?.id) {
-          setIsAuthorized(true);
-        } else {
-          throw new Error();
-        }
-      } catch {
-        localStorage.removeItem('doctorData');
-        router.replace('/doctor/login');
-      }
+      // توجد بيانات -> اسمح بالدخول
+      setIsAuthorized(true);
     }
   }, [router]);
 
-  // أثناء التحقق لا تعرض شيئاً لمنع الوميض
+  // أثناء التحقق، لا تعرض شيئاً (شاشة بيضاء أفضل من الوميض)
   if (!isAuthorized) {
-    return null; // أو عرض spinner بسيط
+    return null; 
   }
 
-  return <>{children}</>;
+  return (
+    <div className="min-h-screen bg-slate-50">
+      {/* هنا سيتم عرض محتوى الصفحات الداخلية */}
+      {children}
+    </div>
+  );
 }
