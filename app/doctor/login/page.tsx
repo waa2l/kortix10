@@ -11,22 +11,22 @@ export default function DoctorLogin() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // التحقق المبدئي: لو مسجل دخول، وديه الداشبورد
+  // 1. إذا كان المستخدم مسجلاً بالفعل، حوله للداشبورد
   useEffect(() => {
-    if (localStorage.getItem('doctorData')) {
+    const data = localStorage.getItem('doctorData');
+    if (data) {
       router.replace('/doctor/dashboard');
     }
   }, [router]);
 
+  // 2. معالجة تسجيل الدخول
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setLoading(true);
 
     try {
-      console.log('Attemping login...');
-
-      // 1. البحث
+      // البحث عن الطبيب
       const { data, error } = await supabase
         .from('doctors')
         .select('*')
@@ -35,28 +35,22 @@ export default function DoctorLogin() {
 
       if (error || !data) throw new Error('كود الطبيب غير صحيح');
 
-      // 2. التحقق (Validation)
+      // التحقق من صحة باقي البيانات
       if (data.phone?.trim() !== formData.phone.trim()) throw new Error('رقم الهاتف غير مطابق');
       if (data.national_id?.trim() !== formData.national_id.trim()) throw new Error('الرقم القومي غير مطابق');
       if (data.email?.trim().toLowerCase() !== formData.email.trim().toLowerCase()) throw new Error('البريد الإلكتروني غير مطابق');
       if (data.code?.trim() !== formData.code.trim()) throw new Error('الكود السري غير صحيح');
 
-      // 3. الحفظ والتوجيه
+      // نجاح -> حفظ البيانات
       localStorage.setItem('doctorData', JSON.stringify(data));
       
-      // هام: استخدام window.location.href هنا يضمن "تصفير" حالة التطبيق والانتقال النظيف
-      // هذا يمنع أي تداخل مع الـ router القديم
+      // التوجيه (استخدمنا window.location لضمان تحديث كامل للحالة)
       window.location.href = '/doctor/dashboard';
 
     } catch (err: any) {
-      console.error(err);
-      setError(err.message || "حدث خطأ");
+      setError(err.message || 'حدث خطأ ما');
       setLoading(false);
     }
-  };
-
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
   return (
@@ -76,11 +70,11 @@ export default function DoctorLogin() {
         )}
 
         <form onSubmit={handleLogin} className="space-y-4">
-          <div className="relative"><User className="absolute right-3 top-3 text-slate-400 w-4 h-4"/><input name="doctor_number" onChange={handleChange} className="w-full bg-slate-50 border border-slate-300 rounded-lg py-2.5 px-10 text-sm" placeholder="كود الطبيب" required /></div>
-          <div className="relative"><Phone className="absolute right-3 top-3 text-slate-400 w-4 h-4"/><input name="phone" onChange={handleChange} className="w-full bg-slate-50 border border-slate-300 rounded-lg py-2.5 px-10 text-sm" placeholder="رقم الهاتف" required /></div>
-          <div className="relative"><CreditCard className="absolute right-3 top-3 text-slate-400 w-4 h-4"/><input name="national_id" onChange={handleChange} className="w-full bg-slate-50 border border-slate-300 rounded-lg py-2.5 px-10 text-sm" placeholder="الرقم القومي" required /></div>
-          <div className="relative"><Mail className="absolute right-3 top-3 text-slate-400 w-4 h-4"/><input name="email" type="email" onChange={handleChange} className="w-full bg-slate-50 border border-slate-300 rounded-lg py-2.5 px-10 text-sm" placeholder="البريد الإلكتروني" required /></div>
-          <div className="relative"><Lock className="absolute right-3 top-3 text-slate-400 w-4 h-4"/><input name="code" type="password" onChange={handleChange} maxLength={4} className="w-full bg-slate-50 border border-slate-300 rounded-lg py-2.5 px-10 text-lg tracking-widest" placeholder="الكود السري" required /></div>
+          <div className="relative"><User className="absolute right-3 top-3 text-slate-400 w-4 h-4"/><input name="doctor_number" onChange={e => setFormData({...formData, doctor_number: e.target.value})} className="w-full bg-slate-50 border border-slate-300 rounded-lg py-2.5 px-10 text-sm" placeholder="كود الطبيب" required /></div>
+          <div className="relative"><Phone className="absolute right-3 top-3 text-slate-400 w-4 h-4"/><input name="phone" onChange={e => setFormData({...formData, phone: e.target.value})} className="w-full bg-slate-50 border border-slate-300 rounded-lg py-2.5 px-10 text-sm" placeholder="رقم الهاتف" required /></div>
+          <div className="relative"><CreditCard className="absolute right-3 top-3 text-slate-400 w-4 h-4"/><input name="national_id" onChange={e => setFormData({...formData, national_id: e.target.value})} className="w-full bg-slate-50 border border-slate-300 rounded-lg py-2.5 px-10 text-sm" placeholder="الرقم القومي" required /></div>
+          <div className="relative"><Mail className="absolute right-3 top-3 text-slate-400 w-4 h-4"/><input name="email" type="email" onChange={e => setFormData({...formData, email: e.target.value})} className="w-full bg-slate-50 border border-slate-300 rounded-lg py-2.5 px-10 text-sm" placeholder="البريد الإلكتروني" required /></div>
+          <div className="relative"><Lock className="absolute right-3 top-3 text-slate-400 w-4 h-4"/><input name="code" type="password" onChange={e => setFormData({...formData, code: e.target.value})} maxLength={4} className="w-full bg-slate-50 border border-slate-300 rounded-lg py-2.5 px-10 text-lg tracking-widest" placeholder="الكود السري" required /></div>
           
           <button type="submit" disabled={loading} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg mt-4 disabled:opacity-50">
             {loading ? 'جاري التحقق...' : 'تسجيل الدخول'}
