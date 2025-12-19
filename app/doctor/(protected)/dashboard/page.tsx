@@ -13,11 +13,16 @@ export default function DoctorDashboard() {
   const [isClient, setIsClient] = useState(false);
   const [doctor, setDoctor] = useState<any>(null);
 
-  useEffect(() => {
+useEffect(() => {
     setIsClient(true);
-    const doctorSession = localStorage.getItem('doctorSession');
-    if (!doctorSession) {
+    // استخدم doctorData بدلاً من doctorSession
+    const doctorData = localStorage.getItem('doctorData'); 
+    
+    if (!doctorData) {
       router.push('/doctor/login');
+    } else {
+      // (اختياري) يمكنك تحميل بيانات الطبيب هنا لاستخدامها
+      setDoctor(JSON.parse(doctorData));
     }
   }, [router]);
 
