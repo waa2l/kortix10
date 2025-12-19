@@ -6,17 +6,18 @@ import { Trash2, Edit, Save, X, Activity } from 'lucide-react';
 
 export default function ClinicsSettings() {
   const [clinics, setClinics] = useState<any[]>([]);
-  const [screens, setScreens] = useState<any[]>([]); // للقائمة المنسدلة
+  const [screens, setScreens] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
   const [currentId, setCurrentId] = useState<string | null>(null);
 
-  // النموذج يطابق قاعدة البيانات بدقة
+  // حالة لتخزين الشاشات المختارة (Array of IDs)
+  const [selectedScreenIds, setSelectedScreenIds] = useState<string[]>([]);
+
   const [formData, setFormData] = useState({
     clinic_name: '',
     clinic_number: '',
     control_password: '',
-    screen_id: '',
     max_daily_appointments: '50',
     morning_shift_start: '08:00',
     morning_shift_end: '14:00',
@@ -28,20 +29,20 @@ export default function ClinicsSettings() {
   const fetchData = async () => {
     try {
       setLoading(true);
-      // جلب الشاشات للقائمة
-      const { data: screensData } = await supabase.from('screens').select('id, screen_number').order('screen_number');
+      // جلب الشاشات
+      const { data: screensData } = await supabase.from('screens').select('*').order('screen_number');
       setScreens(screensData || []);
 
-      // جلب العيادات مع بيانات الشاشة المرتبطة
+      // جلب العيادات
       const { data: clinicsData, error } = await supabase
         .from('clinics')
-        .select(`*, screens (screen_number)`)
+        .select('*')
         .order('clinic_number');
       
       if (error) throw error;
       setClinics(clinicsData || []);
     } catch (error) {
-      console.error('Error:', error);
+      console.error(error);
     } finally {
       setLoading(false);
     }
@@ -49,35 +50,72 @@ export default function ClinicsSettings() {
 
   useEffect(() => { fetchData(); }, []);
 
+  // جلب الشاشات المرتبطة بعيادة محددة عند التعديل
+  const fetchClinicScreens = async (clinicId: string) => {
+    const { data } = await supabase
+      .from('clinic_screens')
+      .select('screen_id')
+      .eq('clinic_id', clinicId);
+    
+    if (data) {
+      setSelectedScreenIds(data.map((item: any) => item.screen_id));
+    }
+  };
+
+  const handleScreenToggle = (screenId: string) => {
+    setSelectedScreenIds(prev => 
+      prev.includes(screenId) ? prev.filter(id => id !== screenId) : [...prev, screenId]
+    );
+  };
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const payload = {
+      const payload: any = {
         clinic_name: formData.clinic_name,
         clinic_number: parseInt(formData.clinic_number),
         control_password: formData.control_password,
-        screen_id: formData.screen_id || null, // يمكن أن تكون null
         max_daily_appointments: parseInt(formData.max_daily_appointments),
-        morning_shift_start: formData.morning_shift_start + ':00', // إضافة ثواني لتوافق TIME
+        morning_shift_start: formData.morning_shift_start + ':00',
         morning_shift_end: formData.morning_shift_end + ':00',
         evening_shift_start: formData.evening_shift_start + ':00',
         evening_shift_end: formData.evening_shift_end + ':00',
         is_active: formData.is_active
       };
 
+      let clinicId = currentId;
+
       if (isEditing && currentId) {
         const { error } = await supabase.from('clinics').update(payload).eq('id', currentId);
         if (error) throw error;
       } else {
-        const { error } = await supabase.from('clinics').insert([payload]);
+        const { data, error } = await supabase.from('clinics').insert([payload]).select().single();
         if (error) throw error;
+        clinicId = data.id;
       }
 
+      // تحديث علاقة الشاشات
+      if (clinicId) {
+        // 1. حذف العلاقات القديمة
+        await supabase.from('clinic_screens').delete().eq('clinic_id', clinicId);
+        
+        // 2. إضافة العلاقات الجديدة
+        if (selectedScreenIds.length > 0) {
+          const relations = selectedScreenIds.map(screenId => ({
+            clinic_id: clinicId,
+            screen_id: screenId
+          }));
+          await supabase.from('clinic_screens').insert(relations);
+        }
+      }
+
+      // Reset
       setFormData({
-        clinic_name: '', clinic_number: '', control_password: '', screen_id: '',
+        clinic_name: '', clinic_number: '', control_password: '',
         max_daily_appointments: '50', morning_shift_start: '08:00', morning_shift_end: '14:00',
         evening_shift_start: '14:00', evening_shift_end: '20:00', is_active: true
       });
+      setSelectedScreenIds([]);
       setIsEditing(false);
       setCurrentId(null);
       fetchData();
@@ -87,12 +125,6 @@ export default function ClinicsSettings() {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('حذف العيادة؟')) return;
-    const { error } = await supabase.from('clinics').delete().eq('id', id);
-    if (!error) fetchData(); else alert('لا يمكن الحذف');
-  };
-
   const handleEdit = (clinic: any) => {
     setIsEditing(true);
     setCurrentId(clinic.id);
@@ -100,15 +132,20 @@ export default function ClinicsSettings() {
       clinic_name: clinic.clinic_name,
       clinic_number: clinic.clinic_number.toString(),
       control_password: clinic.control_password,
-      screen_id: clinic.screen_id || '',
       max_daily_appointments: clinic.max_daily_appointments.toString(),
-      // قص الثواني للعرض في input type="time"
       morning_shift_start: clinic.morning_shift_start?.substring(0, 5) || '08:00',
       morning_shift_end: clinic.morning_shift_end?.substring(0, 5) || '14:00',
       evening_shift_start: clinic.evening_shift_start?.substring(0, 5) || '14:00',
       evening_shift_end: clinic.evening_shift_end?.substring(0, 5) || '20:00',
       is_active: clinic.is_active
     });
+    fetchClinicScreens(clinic.id);
+  };
+
+  const handleDelete = async (id: string) => {
+    if(!confirm('حذف العيادة؟')) return;
+    await supabase.from('clinics').delete().eq('id', id);
+    fetchData();
   };
 
   return (
@@ -123,31 +160,27 @@ export default function ClinicsSettings() {
           <input type="number" placeholder="رقم العيادة" value={formData.clinic_number} onChange={e => setFormData({...formData, clinic_number: e.target.value})} className="border p-2 rounded" required />
           <input placeholder="كلمة مرور التحكم" value={formData.control_password} onChange={e => setFormData({...formData, control_password: e.target.value})} className="border p-2 rounded" required />
           
-          <select value={formData.screen_id} onChange={e => setFormData({...formData, screen_id: e.target.value})} className="border p-2 rounded">
-            <option value="">-- اختر الشاشة --</option>
-            {screens.map(s => <option key={s.id} value={s.id}>شاشة رقم {s.screen_number}</option>)}
-          </select>
-
-          <input type="number" placeholder="الحد الأقصى للحجز" value={formData.max_daily_appointments} onChange={e => setFormData({...formData, max_daily_appointments: e.target.value})} className="border p-2 rounded" />
-          
-          <div className="flex gap-2 items-center">
-            <label className="text-xs">صباحي من</label>
-            <input type="time" value={formData.morning_shift_start} onChange={e => setFormData({...formData, morning_shift_start: e.target.value})} className="border p-1 rounded text-xs flex-1" />
-            <label className="text-xs">إلى</label>
-            <input type="time" value={formData.morning_shift_end} onChange={e => setFormData({...formData, morning_shift_end: e.target.value})} className="border p-1 rounded text-xs flex-1" />
+          <div className="md:col-span-3 bg-slate-50 p-4 rounded border">
+            <label className="block text-sm font-bold mb-2">اختر الشاشات التي ستعرض هذه العيادة:</label>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+              {screens.map(s => (
+                <label key={s.id} className="flex items-center gap-2 cursor-pointer bg-white p-2 rounded border hover:border-blue-500">
+                  <input 
+                    type="checkbox" 
+                    checked={selectedScreenIds.includes(s.id)}
+                    onChange={() => handleScreenToggle(s.id)}
+                    className="w-4 h-4 accent-blue-600"
+                  />
+                  <span className="text-sm">{s.screen_name} ({s.screen_number})</span>
+                </label>
+              ))}
+            </div>
           </div>
 
-          <div className="flex gap-2 items-center">
-            <label className="text-xs">مسائي من</label>
-            <input type="time" value={formData.evening_shift_start} onChange={e => setFormData({...formData, evening_shift_start: e.target.value})} className="border p-1 rounded text-xs flex-1" />
-            <label className="text-xs">إلى</label>
-            <input type="time" value={formData.evening_shift_end} onChange={e => setFormData({...formData, evening_shift_end: e.target.value})} className="border p-1 rounded text-xs flex-1" />
-          </div>
-
-          <div className="flex items-center gap-2">
-            <input type="checkbox" checked={formData.is_active} onChange={e => setFormData({...formData, is_active: e.target.checked})} className="w-5 h-5" />
-            <label>العيادة مفعلة</label>
-          </div>
+          {/* Time Fields & Status ... (Same as before) */}
+          <div className="flex gap-2 items-center"><label className="text-xs">صباحي من</label><input type="time" value={formData.morning_shift_start} onChange={e => setFormData({...formData, morning_shift_start: e.target.value})} className="border p-1 rounded text-xs flex-1" /><label className="text-xs">إلى</label><input type="time" value={formData.morning_shift_end} onChange={e => setFormData({...formData, morning_shift_end: e.target.value})} className="border p-1 rounded text-xs flex-1" /></div>
+          <div className="flex gap-2 items-center"><label className="text-xs">مسائي من</label><input type="time" value={formData.evening_shift_start} onChange={e => setFormData({...formData, evening_shift_start: e.target.value})} className="border p-1 rounded text-xs flex-1" /><label className="text-xs">إلى</label><input type="time" value={formData.evening_shift_end} onChange={e => setFormData({...formData, evening_shift_end: e.target.value})} className="border p-1 rounded text-xs flex-1" /></div>
+          <div className="flex items-center gap-2"><input type="checkbox" checked={formData.is_active} onChange={e => setFormData({...formData, is_active: e.target.checked})} className="w-5 h-5" /><label>العيادة مفعلة</label></div>
 
           <div className="md:col-span-3 flex gap-2 mt-4">
             <button type="submit" className="bg-blue-600 text-white px-6 py-2 rounded flex-1">{isEditing ? 'تحديث البيانات' : 'إضافة عيادة'}</button>
@@ -162,7 +195,6 @@ export default function ClinicsSettings() {
             <tr>
               <th className="p-4">الاسم</th>
               <th className="p-4">رقم</th>
-              <th className="p-4">الشاشة</th>
               <th className="p-4">الحالة</th>
               <th className="p-4">تحكم</th>
             </tr>
@@ -172,7 +204,6 @@ export default function ClinicsSettings() {
               <tr key={clinic.id} className="border-t">
                 <td className="p-4 font-bold">{clinic.clinic_name}</td>
                 <td className="p-4">{clinic.clinic_number}</td>
-                <td className="p-4">{clinic.screens?.screen_number || '-'}</td>
                 <td className="p-4">{clinic.is_active ? '✅' : '❌'}</td>
                 <td className="p-4 flex gap-2">
                   <button onClick={() => handleEdit(clinic)} className="text-blue-600"><Edit/></button>
@@ -182,7 +213,6 @@ export default function ClinicsSettings() {
             ))}
           </tbody>
         </table>
-        {loading && <p className="p-4 text-center">جاري التحميل...</p>}
       </div>
     </div>
   );
