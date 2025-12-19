@@ -24,6 +24,8 @@ export default function DoctorLogin() {
     setLoading(true);
 
     try {
+      console.log('Attemping login...');
+
       // 1. البحث
       const { data, error } = await supabase
         .from('doctors')
@@ -31,22 +33,24 @@ export default function DoctorLogin() {
         .eq('doctor_number', formData.doctor_number.trim())
         .single();
 
-      if (error || !data) throw new Error('بيانات الطبيب غير صحيحة');
+      if (error || !data) throw new Error('كود الطبيب غير صحيح');
 
-      // 2. المطابقة
-      if (data.phone.trim() !== formData.phone.trim()) throw new Error('بيانات الهاتف غير مطابقة');
-      if (data.national_id.trim() !== formData.national_id.trim()) throw new Error('الرقم القومي غير مطابق');
-      if (data.email.trim().toLowerCase() !== formData.email.trim().toLowerCase()) throw new Error('البريد الإلكتروني غير مطابق');
-      if (data.code.trim() !== formData.code.trim()) throw new Error('الكود السري غير صحيح');
+      // 2. التحقق (Validation)
+      if (data.phone?.trim() !== formData.phone.trim()) throw new Error('رقم الهاتف غير مطابق');
+      if (data.national_id?.trim() !== formData.national_id.trim()) throw new Error('الرقم القومي غير مطابق');
+      if (data.email?.trim().toLowerCase() !== formData.email.trim().toLowerCase()) throw new Error('البريد الإلكتروني غير مطابق');
+      if (data.code?.trim() !== formData.code.trim()) throw new Error('الكود السري غير صحيح');
 
-      // 3. النجاح
+      // 3. الحفظ والتوجيه
       localStorage.setItem('doctorData', JSON.stringify(data));
       
-      // التوجيه (هنا نستخدم window.location لضمان تحديث كامل للتطبيق بعد الدخول)
+      // هام: استخدام window.location.href هنا يضمن "تصفير" حالة التطبيق والانتقال النظيف
+      // هذا يمنع أي تداخل مع الـ router القديم
       window.location.href = '/doctor/dashboard';
 
     } catch (err: any) {
-      setError(err.message || 'حدث خطأ غير متوقع');
+      console.error(err);
+      setError(err.message || "حدث خطأ");
       setLoading(false);
     }
   };
