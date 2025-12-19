@@ -107,8 +107,8 @@ export default function Home() {
       {/* Header */}
       <header className="bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-lg">
         <div className="max-w-7xl mx-auto px-4 py-8">
-          <h1 className="text-4xl font-bold text-center mb-2">نظام إدارة الطوابير الطبية الذكي</h1>
-          <p className="text-center text-blue-100">Smart Medical Queue Management System</p>
+          <h1 className="text-4xl font-bold text-center mb-2">مركز طب أسرة غرب المطار</h1>
+          <p className="text-center text-blue-100">نظام الانتظار الذكى</p>
         </div>
       </header>
 
@@ -137,7 +137,7 @@ export default function Home() {
       {/* Footer */}
       <footer className="bg-gray-800 text-white mt-16 py-8">
         <div className="max-w-7xl mx-auto px-4 text-center">
-          <p className="text-gray-400">© 2025 نظام إدارة الطوابير الطبية الذكي - جميع الحقوق محفوظة</p>
+          <p className="text-gray-400">© 2025 نظام إدارة الطوابير الطبية الذكي - اعداد د/ وائل عبد اللطيف ربيع - جميع الحقوق محفوظة</p>
         </div>
       </footer>
     </div>
