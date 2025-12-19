@@ -1,173 +1,184 @@
 'use client';
 
-import { useState } from 'react';
-import Link from 'next/link';
-import { ArrowRight, Plus, Trash2, Edit2 } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { supabase } from '@/lib/supabase';
+import { Trash2, Edit, Plus, Save, X, Monitor } from 'lucide-react';
 
 export default function ScreensSettings() {
-  const [screens, setScreens] = useState([
-    { id: 1, number: 1, password: 'screen123', is_active: true },
-    { id: 2, number: 2, password: 'screen456', is_active: true },
-    { id: 3, number: 3, password: 'screen789', is_active: true },
-    { id: 4, number: 4, password: 'screen012', is_active: true },
-    { id: 5, number: 5, password: 'screen345', is_active: true },
-  ]);
-  const [showForm, setShowForm] = useState(false);
-  const [formData, setFormData] = useState({ number: '', password: '' });
+  const [screens, setScreens] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [isEditing, setIsEditing] = useState(false);
+  const [currentId, setCurrentId] = useState<string | null>(null);
 
-  const handleAddScreen = (e: React.FormEvent) => {
+  // النموذج يطابق قاعدة البيانات
+  const [formData, setFormData] = useState({
+    screen_number: '',
+    password: '',
+    is_active: true
+  });
+
+  // جلب البيانات
+  const fetchScreens = async () => {
+    try {
+      setLoading(true);
+      const { data, error } = await supabase
+        .from('screens')
+        .select('*')
+        .order('screen_number', { ascending: true });
+      
+      if (error) throw error;
+      setScreens(data || []);
+    } catch (error) {
+      console.error('Error fetching screens:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchScreens();
+  }, []);
+
+  // الحفظ (إضافة أو تعديل)
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (formData.number && formData.password) {
-      setScreens([
-        ...screens,
-        {
-          id: screens.length + 1,
-          number: parseInt(formData.number),
-          password: formData.password,
-          is_active: true,
-        },
-      ]);
-      setFormData({ number: '', password: '' });
-      setShowForm(false);
+    if (!formData.screen_number || !formData.password) return alert('يرجى ملء كافة البيانات');
+
+    try {
+      const payload = {
+        screen_number: parseInt(formData.screen_number), // تحويل لرقم
+        password: formData.password,
+        is_active: formData.is_active
+      };
+
+      if (isEditing && currentId) {
+        // تعديل
+        const { error } = await supabase.from('screens').update(payload).eq('id', currentId);
+        if (error) throw error;
+      } else {
+        // إضافة جديد
+        const { error } = await supabase.from('screens').insert([payload]);
+        if (error) throw error;
+      }
+
+      // إعادة تعيين النموذج وتحديث البيانات
+      setFormData({ screen_number: '', password: '', is_active: true });
+      setIsEditing(false);
+      setCurrentId(null);
+      fetchScreens();
+      alert('تم الحفظ بنجاح');
+
+    } catch (error: any) {
+      alert('حدث خطأ: ' + error.message);
     }
   };
 
-  const handleDeleteScreen = (id: number) => {
-    if (confirm('هل تريد حذف هذه الشاشة؟')) {
-      setScreens(screens.filter((s) => s.id !== id));
+  // الحذف
+  const handleDelete = async (id: string) => {
+    if (!confirm('هل أنت متأكد من حذف هذه الشاشة؟')) return;
+    try {
+      const { error } = await supabase.from('screens').delete().eq('id', id);
+      if (error) throw error;
+      fetchScreens();
+    } catch (error: any) {
+      alert('لا يمكن الحذف (قد تكون مرتبطة بعيادات)');
     }
   };
 
-  const handleToggleActive = (id: number) => {
-    setScreens(
-      screens.map((s) =>
-        s.id === id ? { ...s, is_active: !s.is_active } : s
-      )
-    );
+  // تعبئة النموذج للتعديل
+  const handleEdit = (screen: any) => {
+    setIsEditing(true);
+    setCurrentId(screen.id);
+    setFormData({
+      screen_number: screen.screen_number.toString(),
+      password: screen.password,
+      is_active: screen.is_active
+    });
   };
 
   return (
-    <div className="min-h-screen bg-gray-100">
-      {/* Header */}
-      <header className="bg-white shadow-md p-6 border-b border-gray-200">
-        <div className="flex items-center gap-4">
-          <Link href="/admin/dashboard">
-            <button className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
-              <ArrowRight className="w-6 h-6 text-gray-600" />
-            </button>
-          </Link>
+    <div className="p-6 bg-slate-50 min-h-screen font-cairo" dir="rtl">
+      <h1 className="text-2xl font-bold mb-6 text-slate-800 flex items-center gap-2">
+        <Monitor className="text-blue-600"/> إعدادات الشاشات
+      </h1>
+
+      {/* Form */}
+      <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 mb-8">
+        <h2 className="text-lg font-bold mb-4">{isEditing ? 'تعديل شاشة' : 'إضافة شاشة جديدة'}</h2>
+        <form onSubmit={handleSave} className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
           <div>
-            <h1 className="text-3xl font-bold text-gray-800">إدارة الشاشات</h1>
-            <p className="text-gray-600 mt-1">إضافة وتعديل وحذف الشاشات</p>
+            <label className="block text-sm text-slate-600 mb-1">رقم الشاشة</label>
+            <input 
+              type="number" 
+              value={formData.screen_number}
+              onChange={(e) => setFormData({...formData, screen_number: e.target.value})}
+              className="w-full border rounded p-2"
+              required
+            />
           </div>
-        </div>
-      </header>
-
-      {/* Content */}
-      <main className="max-w-6xl mx-auto p-6">
-        {/* Add Button */}
-        <button
-          onClick={() => setShowForm(!showForm)}
-          className="mb-6 flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg transition-colors"
-        >
-          <Plus className="w-5 h-5" />
-          إضافة شاشة جديدة
-        </button>
-
-        {/* Add Form */}
-        {showForm && (
-          <div className="bg-white rounded-lg shadow-md p-6 mb-6">
-            <form onSubmit={handleAddScreen} className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">رقم الشاشة</label>
-                  <input
-                    type="number"
-                    value={formData.number}
-                    onChange={(e) => setFormData({ ...formData, number: e.target.value })}
-                    placeholder="أدخل رقم الشاشة"
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">كلمة المرور</label>
-                  <input
-                    type="password"
-                    value={formData.password}
-                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                    placeholder="أدخل كلمة المرور"
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    required
-                  />
-                </div>
-              </div>
-
-              <div className="flex gap-4">
-                <button
-                  type="submit"
-                  className="flex-1 bg-green-600 hover:bg-green-700 text-white font-bold py-2 rounded-lg transition-colors"
-                >
-                  إضافة
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowForm(false)}
-                  className="flex-1 bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 rounded-lg transition-colors"
-                >
-                  إلغاء
-                </button>
-              </div>
-            </form>
+          <div>
+            <label className="block text-sm text-slate-600 mb-1">كلمة المرور (للدخول)</label>
+            <input 
+              type="text" 
+              value={formData.password}
+              onChange={(e) => setFormData({...formData, password: e.target.value})}
+              className="w-full border rounded p-2"
+              required
+            />
           </div>
-        )}
+          <div className="flex items-center gap-2 h-10">
+            <input 
+              type="checkbox" 
+              checked={formData.is_active}
+              onChange={(e) => setFormData({...formData, is_active: e.target.checked})}
+              className="w-5 h-5 accent-blue-600"
+            />
+            <label>شاشة نشطة</label>
+          </div>
+          <div className="flex gap-2">
+            <button type="submit" className="flex-1 bg-blue-600 text-white py-2 rounded hover:bg-blue-700 flex items-center justify-center gap-2">
+              <Save size={18} /> {isEditing ? 'تحديث' : 'حفظ'}
+            </button>
+            {isEditing && (
+              <button type="button" onClick={() => { setIsEditing(false); setFormData({ screen_number: '', password: '', is_active: true }); }} className="bg-gray-500 text-white px-4 rounded">
+                <X size={18} />
+              </button>
+            )}
+          </div>
+        </form>
+      </div>
 
-        {/* Screens Table */}
-        <div className="bg-white rounded-lg shadow-md overflow-hidden">
-          <table className="w-full">
-            <thead className="bg-gray-100 border-b">
-              <tr>
-                <th className="px-6 py-3 text-right text-sm font-semibold text-gray-700">رقم الشاشة</th>
-                <th className="px-6 py-3 text-right text-sm font-semibold text-gray-700">كلمة المرور</th>
-                <th className="px-6 py-3 text-right text-sm font-semibold text-gray-700">الحالة</th>
-                <th className="px-6 py-3 text-right text-sm font-semibold text-gray-700">الإجراءات</th>
+      {/* Table */}
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+        <table className="w-full text-right">
+          <thead className="bg-slate-100">
+            <tr>
+              <th className="p-4">رقم الشاشة</th>
+              <th className="p-4">كلمة المرور</th>
+              <th className="p-4">الحالة</th>
+              <th className="p-4">إجراءات</th>
+            </tr>
+          </thead>
+          <tbody>
+            {screens.map((screen) => (
+              <tr key={screen.id} className="border-t hover:bg-slate-50">
+                <td className="p-4 font-bold">{screen.screen_number}</td>
+                <td className="p-4 text-slate-600">{screen.password}</td>
+                <td className="p-4">
+                  {screen.is_active 
+                    ? <span className="text-green-600 bg-green-100 px-2 py-1 rounded text-xs">نشطة</span> 
+                    : <span className="text-red-600 bg-red-100 px-2 py-1 rounded text-xs">متوقفة</span>}
+                </td>
+                <td className="p-4 flex gap-2">
+                  <button onClick={() => handleEdit(screen)} className="text-blue-600 hover:bg-blue-50 p-2 rounded"><Edit size={18} /></button>
+                  <button onClick={() => handleDelete(screen.id)} className="text-red-600 hover:bg-red-50 p-2 rounded"><Trash2 size={18} /></button>
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {screens.map((screen) => (
-                <tr key={screen.id} className="border-b hover:bg-gray-50">
-                  <td className="px-6 py-4 text-gray-800 font-semibold">{screen.number}</td>
-                  <td className="px-6 py-4 text-gray-600">••••••••</td>
-                  <td className="px-6 py-4">
-                    <button
-                      onClick={() => handleToggleActive(screen.id)}
-                      className={`px-4 py-2 rounded-full font-bold text-sm ${
-                        screen.is_active
-                          ? 'bg-green-100 text-green-800'
-                          : 'bg-red-100 text-red-800'
-                      }`}
-                    >
-                      {screen.is_active ? 'نشطة' : 'معطلة'}
-                    </button>
-                  </td>
-                  <td className="px-6 py-4 flex gap-2">
-                    <button className="p-2 hover:bg-blue-100 rounded-lg transition-colors text-blue-600">
-                      <Edit2 className="w-5 h-5" />
-                    </button>
-                    <button
-                      onClick={() => handleDeleteScreen(screen.id)}
-                      className="p-2 hover:bg-red-100 rounded-lg transition-colors text-red-600"
-                    >
-                      <Trash2 className="w-5 h-5" />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </main>
+            ))}
+          </tbody>
+        </table>
+        {loading && <p className="p-4 text-center text-slate-500">جاري التحميل...</p>}
+      </div>
     </div>
   );
 }
