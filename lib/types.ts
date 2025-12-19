@@ -7,7 +7,7 @@ export interface User {
   created_at: string;
 }
 
-// --- التعديل هنا: إضافة image_url و code ---
+// التعديل الضروري هنا 👇
 export interface Doctor {
   id: string;
   doctor_number: string;
@@ -26,8 +26,8 @@ export interface Doctor {
   absence_days?: number;
   notes?: string;
   email?: string;
-  image_url?: string; // <--- هذا هو الحقل المفقود
-  code?: string;      // أضفنا هذا أيضاً لأنه مستخدم في تسجيل الدخول
+  image_url?: string; // <--- هذا السطر هو حل المشكلة (علامة ؟ تعني أنه اختياري)
+  code?: string;      // وهذا أيضاً مطلوب لتسجيل الدخول
   created_at: string;
   updated_at: string;
 }
