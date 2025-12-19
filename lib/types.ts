@@ -7,7 +7,7 @@ export interface User {
   created_at: string;
 }
 
-// التعديل الضروري هنا 👇
+// === هذا هو الجزء الناقص الذي يسبب المشكلة ===
 export interface Doctor {
   id: string;
   doctor_number: string;
@@ -26,11 +26,12 @@ export interface Doctor {
   absence_days?: number;
   notes?: string;
   email?: string;
-  image_url?: string; // <--- هذا السطر هو حل المشكلة (علامة ؟ تعني أنه اختياري)
-  code?: string;      // وهذا أيضاً مطلوب لتسجيل الدخول
+  image_url?: string; // الحقل الضروري للصورة
+  code?: string;      // الحقل الضروري لتسجيل الدخول
   created_at: string;
   updated_at: string;
 }
+// ==========================================
 
 export interface AdminSession {
   user: User;
