@@ -2,7 +2,8 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { Activity, Users, Monitor, Settings, FileText, Stethoscope, Calendar, MessageSquare, Calculator, Info } from 'lucide-react';
+// 1. قمنا بإضافة أيقونة MessageCircle للاستيراد
+import { Activity, Users, Monitor, Settings, FileText, Stethoscope, Calendar, MessageSquare, Calculator, Info, MessageCircle } from 'lucide-react';
 
 export default function Home() {
   const [isClient, setIsClient] = useState(false);
@@ -83,6 +84,14 @@ export default function Home() {
       href: '/calculators',
       icon: Calculator,
       color: 'from-amber-500 to-amber-600',
+    },
+    // 2. هذا هو الزر الجديد الذي طلبته
+    {
+      title: 'الشكاوى والمقترحات',
+      description: 'نسعد بسماع رأيك',
+      href: '/complaints', // تأكد من إنشاء صفحة app/complaints/page.tsx
+      icon: MessageCircle,
+      color: 'from-rose-500 to-rose-600',
     },
     {
       title: 'عن البرنامج',
