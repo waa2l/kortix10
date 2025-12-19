@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'نظام إدارة الطوابير الطبية الذكي',
+  title: 'مركز غرب المطار',
   description: 'Smart Medical Queue Management System',
   viewport: 'width=device-width, initial-scale=1',
 };
