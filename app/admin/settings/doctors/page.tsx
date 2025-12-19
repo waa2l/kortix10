@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
-import { Trash2, Edit, Save, X, UserMd } from 'lucide-react';
+// تم استبدال UserMd بـ Stethoscope لأن UserMd غير موجودة
+import { Trash2, Edit, Save, X, Stethoscope } from 'lucide-react';
 
 export default function DoctorsSettings() {
   const [doctors, setDoctors] = useState<any[]>([]);
@@ -19,10 +20,10 @@ export default function DoctorsSettings() {
     phone: '',
     national_id: '',
     clinic_id: '',
-    work_days: '', // String like "Sat,Sun,Mon"
+    work_days: '',
     shift: 'morning',
     email: '',
-    image_url: '', // Text URL input
+    image_url: '',
     work_status: 'active',
     annual_leave_balance: '30',
     emergency_leave_balance: '7',
@@ -114,7 +115,7 @@ export default function DoctorsSettings() {
   return (
     <div className="p-6 bg-slate-50 min-h-screen font-cairo" dir="rtl">
       <h1 className="text-2xl font-bold mb-6 text-slate-800 flex items-center gap-2">
-        <UserMd className="text-blue-600"/> إدارة الأطباء
+        <Stethoscope className="text-blue-600"/> إدارة الأطباء
       </h1>
 
       <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 mb-8">
