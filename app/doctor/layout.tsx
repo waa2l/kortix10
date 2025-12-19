@@ -1,41 +1,30 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { usePathname, useRouter } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 
-export default function DoctorLayout({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname();
+export default function ProtectedDoctorLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
-  const [isLoading, setIsLoading] = useState(true); // حالة تحميل لتجنب الوميض
+  const [isAuthorized, setIsAuthorized] = useState(false);
 
   useEffect(() => {
-    // التأكد من أننا في بيئة المتصفح
-    if (typeof window === 'undefined') return;
-
+    // التحقق من وجود البيانات
     const checkAuth = () => {
-      // 1. استثناء صفحة الدخول من الفحص
-      if (pathname === '/doctor/login') {
-        setIsLoading(false);
-        return;
-      }
-
-      // 2. فحص الصفحات الداخلية (Dashboard, etc.)
       const doctorData = localStorage.getItem('doctorData');
       
       if (!doctorData) {
-        // لا توجد بيانات -> توجيه ناعم لصفحة الدخول
+        // لا توجد بيانات -> طرد المستخدم لصفحة الدخول
         router.replace('/doctor/login');
       } else {
-        // توجد بيانات -> تأكد أنها صالحة وليست تالفة
+        // توجد بيانات -> السماح بالعرض
         try {
           const parsed = JSON.parse(doctorData);
           if (parsed && parsed.id) {
-            setIsLoading(false); // البيانات سليمة، اسمح بالعرض
+            setIsAuthorized(true);
           } else {
-            throw new Error('Invalid Data');
+            throw new Error('بيانات تالفة');
           }
-        } catch (e) {
-          // بيانات تالفة -> احذفها ووجه للدخول
+        } catch {
           localStorage.removeItem('doctorData');
           router.replace('/doctor/login');
         }
@@ -43,19 +32,22 @@ export default function DoctorLayout({ children }: { children: React.ReactNode }
     };
 
     checkAuth();
-  }, [pathname, router]);
+  }, [router]);
 
-  // أثناء التحقق، اعرض شاشة تحميل فقط (يمنع الوميض والتوجيه الخاطئ)
-  if (isLoading) {
+  // عرض شاشة تحميل أثناء التحقق
+  if (!isAuthorized) {
     return (
-      <div className="h-screen w-screen bg-slate-50 flex items-center justify-center">
-        <div className="text-slate-400 font-bold animate-pulse flex flex-col items-center gap-2">
-          <div className="w-6 h-6 border-2 border-slate-300 border-t-blue-600 rounded-full animate-spin"></div>
-          جاري التحقق...
-        </div>
+      <div className="min-h-screen w-full flex flex-col items-center justify-center bg-slate-50 gap-4">
+        <div className="w-12 h-12 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin"></div>
+        <p className="text-slate-500 font-bold animate-pulse">جاري التحقق من الصلاحيات...</p>
       </div>
     );
   }
 
-  return <>{children}</>;
+  return (
+    <>
+      {/* يمكنك هنا وضع الهيدر أو القائمة الجانبية المشتركة لجميع صفحات الطبيب */}
+      {children}
+    </>
+  );
 }
