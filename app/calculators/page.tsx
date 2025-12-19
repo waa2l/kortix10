@@ -114,6 +114,44 @@ export default function CalculatorsMenu() {
       icon: Activity, // أو Stethoscope
       color: 'bg-emerald-50 text-emerald-600',
     },
+    // ... الحاسبات السابقة ...
+
+    // --- المجموعة الخامسة (الأخيرة) ---
+    {
+      title: 'منحنيات النمو (للأطفال)',
+      description: 'مقارنة وزن وطول طفلك بالمعدلات العالمية (WHO) لمعرفة حالة النمو.',
+      href: '/calculators/growth-charts',
+      icon: TrendingUp, // تأكد من استيراد الأيقونة
+      color: 'bg-orange-50 text-orange-600',
+    },
+    {
+      title: 'تطورات الطفل (Milestones)',
+      description: 'تعرف على المهارات الحركية والعقلية المتوقعة لطفلك حسب عمره.',
+      href: '/calculators/child-development',
+      icon: Baby,
+      color: 'bg-blue-50 text-blue-600',
+    },
+    {
+      title: 'مقياس الألم',
+      description: 'أداة لتقييم حدة الألم (للكبار والأطفال) لتسهيل التشخيص.',
+      href: '/calculators/pain-scale',
+      icon: AlertCircle,
+      color: 'bg-red-50 text-red-600',
+    },
+    {
+      title: 'حاسبة مخاطر السكري',
+      description: 'اختبار (FINDRISC) لتقييم احتمالية الإصابة بالسكري النوع الثاني.',
+      href: '/calculators/diabetes-risk',
+      icon: Activity,
+      color: 'bg-sky-50 text-sky-600',
+    },
+    {
+      title: 'مخاطر هشاشة العظام',
+      description: 'فحص سريع لعوامل الخطر التي قد تؤدي لضعف العظام.',
+      href: '/calculators/osteoporosis',
+      icon: Bone, // تأكد من استيراد Bone من lucide-react
+      color: 'bg-slate-50 text-slate-600',
+    },
   ];
 
   return (
