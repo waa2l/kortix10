@@ -7,6 +7,31 @@ export interface User {
   created_at: string;
 }
 
+// --- تمت إضافة تعريف الطبيب (Doctor) ---
+export interface Doctor {
+  id: string;
+  doctor_number: string;
+  full_name: string;
+  phone?: string;
+  national_id?: string;
+  specialization: string;
+  clinic_id?: string;
+  work_days?: string;
+  work_status?: string;
+  shift?: string;
+  check_in_time?: string;
+  check_out_time?: string;
+  annual_leave_balance?: number;
+  emergency_leave_balance?: number;
+  absence_days?: number;
+  notes?: string;
+  email?: string;
+  image_url?: string; // الحقل الجديد
+  code?: string;      // كود الدخول
+  created_at: string;
+  updated_at: string;
+}
+
 export interface AdminSession {
   user: User;
   token: string;
