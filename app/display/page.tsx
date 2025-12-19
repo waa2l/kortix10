@@ -4,10 +4,11 @@ import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useClinics, useSettings, useDoctors } from '@/lib/hooks'; 
 import { supabase } from '@/lib/supabase';
+// --- التعديل هنا: تمت إضافة Type إلى قائمة الاستيراد ---
 import { 
   LogOut, Maximize, Volume2, VolumeX, Bell, 
   Activity, Monitor, Settings2, User, 
-  Columns, LayoutTemplate, Square
+  Columns, LayoutTemplate, Square, Type 
 } from 'lucide-react';
 import { toArabicNumbers, playSequentialAudio, playAudio } from '@/lib/utils'; 
 
@@ -36,14 +37,14 @@ export default function DisplayScreen() {
   const [showDisplaySettings, setShowDisplaySettings] = useState(false);
   
   const [displayConfig, setDisplayConfig] = useState({
-    gridCols: 1,                 // الافتراضي عمود واحد لأن المساحة ضيقة (الربع)
-    textSize: 'normal',          // حجم الخط
-    aspectRatio: 'aspect-video', // نسبة أبعاد الكارت
-    gapSize: 'small',            // مسافات صغيرة افتراضياً
-    paddingSize: 'small',        // حواف صغيرة افتراضياً
-    showDoctor: true,            // إظهار قسم الطبيب
-    showVideo: true,             // إظهار الفيديو
-    layoutRatio: '1/4',          // <--- الإعداد الجديد: نسبة تقسيم الشاشة
+    gridCols: 1,                 
+    textSize: 'normal',          
+    aspectRatio: 'aspect-video', 
+    gapSize: 'small',            
+    paddingSize: 'small',        
+    showDoctor: true,            
+    showVideo: true,             
+    layoutRatio: '1/4',          
   });
 
   // --- حالة الفيديو ---
@@ -79,7 +80,7 @@ export default function DisplayScreen() {
     if (!displayConfig.showVideo) return { cardWidth: 'w-full', videoWidth: 'hidden' };
     
     switch(displayConfig.layoutRatio) {
-      case '1/4': return { cardWidth: 'w-[25%]', videoWidth: 'w-[75%]' }; // الوضع الافتراضي
+      case '1/4': return { cardWidth: 'w-[25%]', videoWidth: 'w-[75%]' }; 
       case '1/3': return { cardWidth: 'w-[33.33%]', videoWidth: 'w-[66.66%]' };
       case '1/2': return { cardWidth: 'w-[50%]', videoWidth: 'w-[50%]' };
       case '2/3': return { cardWidth: 'w-[66.66%]', videoWidth: 'w-[33.33%]' };
@@ -118,7 +119,6 @@ export default function DisplayScreen() {
   };
 
   const getTextClasses = () => {
-    // أحجام ديناميكية تعتمد على حجم العمود
     switch(displayConfig.textSize) {
       case 'xs': return { title: 'text-base', number: 'text-3xl', meta: 'text-[10px]' };
       case 'small': return { title: 'text-lg', number: 'text-5xl', meta: 'text-xs' };
@@ -213,7 +213,6 @@ export default function DisplayScreen() {
           </div>
           <div className="space-y-4 max-h-[70vh] overflow-y-auto custom-scrollbar pr-2">
             
-            {/* 1. تقسيم الشاشة */}
             <div>
               <label className="text-xs text-slate-400 mb-1 block flex items-center gap-1"><Columns className="w-3 h-3"/> مساحة الكروت</label>
               <div className="grid grid-cols-4 gap-1">
@@ -223,7 +222,6 @@ export default function DisplayScreen() {
               </div>
             </div>
 
-            {/* 2. الأعمدة */}
             <div>
               <label className="text-xs text-slate-400 mb-1 block flex items-center gap-1"><LayoutTemplate className="w-3 h-3"/> عدد الأعمدة</label>
               <div className="flex gap-1">
@@ -233,7 +231,6 @@ export default function DisplayScreen() {
               </div>
             </div>
 
-            {/* 3. حجم الخط */}
             <div>
               <label className="text-xs text-slate-400 mb-1 block flex items-center gap-1"><Type className="w-3 h-3"/> حجم الخط</label>
               <div className="grid grid-cols-5 gap-1">
@@ -243,7 +240,6 @@ export default function DisplayScreen() {
               </div>
             </div>
 
-            {/* 4. الأبعاد */}
             <div>
                <label className="text-xs text-slate-400 mb-1 block flex items-center gap-1"><Square className="w-3 h-3"/> نسبة أبعاد الكارت</label>
                <select className="w-full bg-slate-700 border border-slate-600 rounded p-1 text-xs" value={displayConfig.aspectRatio} onChange={(e) => setDisplayConfig({...displayConfig, aspectRatio: e.target.value})}>
@@ -254,7 +250,6 @@ export default function DisplayScreen() {
                </select>
             </div>
 
-            {/* خيارات إضافية */}
             <div className="pt-2 border-t border-slate-600 space-y-2">
                <label className="flex items-center justify-between text-xs cursor-pointer hover:bg-slate-700 p-1 rounded"><span>عرض الفيديو</span><input type="checkbox" checked={displayConfig.showVideo} onChange={(e) => setDisplayConfig({...displayConfig, showVideo: e.target.checked})} className="accent-blue-600"/></label>
                <label className="flex items-center justify-between text-xs cursor-pointer hover:bg-slate-700 p-1 rounded"><span>عرض الطبيب</span><input type="checkbox" checked={displayConfig.showDoctor} onChange={(e) => setDisplayConfig({...displayConfig, showDoctor: e.target.checked})} className="accent-blue-600"/></label>
