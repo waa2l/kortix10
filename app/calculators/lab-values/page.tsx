@@ -2,7 +2,8 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { Activity, ArrowRight, Search, Dna } from 'lucide-react';
+// تم إضافة Info هنا 👇
+import { Activity, ArrowRight, Search, Dna, Info } from 'lucide-react';
 
 export default function LabValuesPage() {
   const [search, setSearch] = useState('');
