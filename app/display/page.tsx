@@ -258,8 +258,12 @@ export default function DisplayScreen() {
              {doctors.length > 0 && doctors[currentDoctorIndex] ? (
                <div className="flex items-center gap-6 animate-fade-in w-full">
                  <div className="w-24 h-24 rounded-full border-2 border-blue-500 overflow-hidden bg-white flex items-center justify-center">
-                   {doctors[currentDoctorIndex].image_url ? <img src={doctors[currentDoctorIndex].image_url} className="w-full h-full object-cover"/> : <User className="w-12 h-12 text-slate-300"/>}
-                 </div>
+{/* استخدام (as any) يجبر النظام على تجاهل فحص النوع لهذا السطر */}
+{(doctors[currentDoctorIndex] as any).image_url ? (
+  <img src={(doctors[currentDoctorIndex] as any).image_url} className="w-full h-full object-cover"/>
+) : (
+  <User className="w-12 h-12 text-slate-300"/>
+)}                 </div>
                  <div>
                    <h3 className="text-2xl font-bold text-white mb-1">{doctors[currentDoctorIndex].full_name}</h3>
                    <p className="text-blue-400 flex items-center gap-2"><Activity className="w-4 h-4"/> {doctors[currentDoctorIndex].specialization}</p>
