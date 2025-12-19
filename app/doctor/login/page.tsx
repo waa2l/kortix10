@@ -21,7 +21,7 @@ export default function DoctorLogin() {
   const [attempts, setAttempts] = useState(0);
   const [lockoutTime, setLockoutTime] = useState<number | null>(null);
 
-  // 1. التحقق الأولي عند تحميل الصفحة
+  // 1. التحقق عند التحميل (Auto-Redirect)
   useEffect(() => {
     // التحقق من الحظر
     const storedAttempts = localStorage.getItem('login_attempts');
@@ -42,17 +42,16 @@ export default function DoctorLogin() {
       setAttempts(parseInt(storedAttempts));
     }
 
-    // التحقق من حالة الدخول الحالية
+    // التحقق من حالة الدخول
     const storedData = localStorage.getItem('doctorData');
     if (storedData) {
       try {
-        const parsedData = JSON.parse(storedData);
-        if (parsedData && parsedData.id) {
-          // إذا كانت البيانات سليمة، انتقل للداشبورد
+        const parsed = JSON.parse(storedData);
+        if (parsed?.id) {
+          // مسجل بالفعل -> انتقل للداشبورد
           router.replace('/doctor/dashboard');
         }
       } catch (e) {
-        // بيانات تالفة، قم بتنظيفها
         localStorage.removeItem('doctorData');
       }
     }
@@ -93,9 +92,9 @@ export default function DoctorLogin() {
     setLoading(true);
 
     try {
-      console.log('Starting login for:', formData.doctor_number);
+      console.log('Attemping login for:', formData.doctor_number);
 
-      // 1. البحث باستخدام رقم الطبيب
+      // 1. البحث
       const { data, error } = await supabase
         .from('doctors')
         .select('*')
@@ -103,31 +102,41 @@ export default function DoctorLogin() {
         .single();
 
       if (error || !data) {
+        handleFailedAttempt();
+        setLoading(false);
         throw new Error('كود الطبيب (Doctor Number) غير صحيح');
       }
 
-      // 2. مطابقة باقي البيانات (Validation)
-      // نستخدم trim() و toLowerCase() لضمان دقة المقارنة
+      // 2. المطابقة
+      // استخدام trim() و toLowerCase() لتفادي مشاكل المسافات وحالة الأحرف
       if (data.phone?.trim() !== formData.phone.trim()) throw new Error('رقم الهاتف غير مطابق');
       if (data.national_id?.trim() !== formData.national_id.trim()) throw new Error('الرقم القومي غير مطابق');
       if (data.email?.trim().toLowerCase() !== formData.email.trim().toLowerCase()) throw new Error('البريد الإلكتروني غير مطابق');
       if (data.code?.trim() !== formData.code.trim()) throw new Error('رمز الدخول (Code) غير صحيح');
 
       // 3. النجاح
-      console.log('Login successful');
+      console.log('Login successful, saving data...');
+      
+      // حفظ البيانات
       localStorage.setItem('doctorData', JSON.stringify(data));
+      
+      // تنظيف
       localStorage.removeItem('login_attempts');
       localStorage.removeItem('login_lockout_time');
 
-      // الانتقال للداشبورد
+      // 4. الانتقال (الناعم)
+      // نستخدم push بدلاً من window.location لتجنب إعادة تحميل التطبيق بالكامل
       router.push('/doctor/dashboard');
 
     } catch (err: any) {
       console.error("Login Error:", err);
-      // إذا كان الخطأ هو خطأ تحقق، قم بزيادة العداد
+      // إذا لم يكن الخطأ قد تم التعامل معه (مثل Throw Error)
       if (!error) {
+         // إذا كان الخطأ غير محدد، نعتبره محاولة فاشلة
+         if (!err.message.includes('غير مطابق') && !err.message.includes('غير صحيح')) {
+            handleFailedAttempt();
+         }
          setError(err.message || "حدث خطأ غير متوقع");
-         handleFailedAttempt();
       }
       setLoading(false);
     }
@@ -165,16 +174,7 @@ export default function DoctorLogin() {
             <label className="block text-xs font-bold text-slate-600 mb-1">كود الطبيب (Doctor No)</label>
             <div className="relative">
               <User className="absolute right-3 top-3 text-slate-400 w-4 h-4" />
-              <input 
-                type="text" 
-                name="doctor_number"
-                value={formData.doctor_number}
-                onChange={handleChange}
-                className="w-full bg-slate-50 border border-slate-300 rounded-lg py-2.5 px-10 outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                placeholder="مثال: DOC001"
-                required
-                disabled={!!lockoutTime}
-              />
+              <input type="text" name="doctor_number" value={formData.doctor_number} onChange={handleChange} className="w-full bg-slate-50 border border-slate-300 rounded-lg py-2.5 px-10 outline-none focus:ring-2 focus:ring-blue-500 text-sm" placeholder="مثال: DOC001" required disabled={!!lockoutTime} />
             </div>
           </div>
 
@@ -183,16 +183,7 @@ export default function DoctorLogin() {
             <label className="block text-xs font-bold text-slate-600 mb-1">رقم الهاتف</label>
             <div className="relative">
               <Phone className="absolute right-3 top-3 text-slate-400 w-4 h-4" />
-              <input 
-                type="text" 
-                name="phone"
-                value={formData.phone}
-                onChange={handleChange}
-                className="w-full bg-slate-50 border border-slate-300 rounded-lg py-2.5 px-10 outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                placeholder="01xxxxxxxxx"
-                required
-                disabled={!!lockoutTime}
-              />
+              <input type="text" name="phone" value={formData.phone} onChange={handleChange} className="w-full bg-slate-50 border border-slate-300 rounded-lg py-2.5 px-10 outline-none focus:ring-2 focus:ring-blue-500 text-sm" placeholder="01xxxxxxxxx" required disabled={!!lockoutTime} />
             </div>
           </div>
 
@@ -201,16 +192,7 @@ export default function DoctorLogin() {
             <label className="block text-xs font-bold text-slate-600 mb-1">الرقم القومي</label>
             <div className="relative">
               <CreditCard className="absolute right-3 top-3 text-slate-400 w-4 h-4" />
-              <input 
-                type="text" 
-                name="national_id"
-                value={formData.national_id}
-                onChange={handleChange}
-                className="w-full bg-slate-50 border border-slate-300 rounded-lg py-2.5 px-10 outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                placeholder="14 رقم"
-                required
-                disabled={!!lockoutTime}
-              />
+              <input type="text" name="national_id" value={formData.national_id} onChange={handleChange} className="w-full bg-slate-50 border border-slate-300 rounded-lg py-2.5 px-10 outline-none focus:ring-2 focus:ring-blue-500 text-sm" placeholder="14 رقم" required disabled={!!lockoutTime} />
             </div>
           </div>
 
@@ -219,16 +201,7 @@ export default function DoctorLogin() {
             <label className="block text-xs font-bold text-slate-600 mb-1">البريد الإلكتروني</label>
             <div className="relative">
               <Mail className="absolute right-3 top-3 text-slate-400 w-4 h-4" />
-              <input 
-                type="email" 
-                name="email"
-                value={formData.email}
-                onChange={handleChange}
-                className="w-full bg-slate-50 border border-slate-300 rounded-lg py-2.5 px-10 outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                placeholder="email@example.com"
-                required
-                disabled={!!lockoutTime}
-              />
+              <input type="email" name="email" value={formData.email} onChange={handleChange} className="w-full bg-slate-50 border border-slate-300 rounded-lg py-2.5 px-10 outline-none focus:ring-2 focus:ring-blue-500 text-sm" placeholder="email@example.com" required disabled={!!lockoutTime} />
             </div>
           </div>
 
@@ -237,25 +210,11 @@ export default function DoctorLogin() {
             <label className="block text-xs font-bold text-slate-600 mb-1">رمز الدخول (4 أرقام)</label>
             <div className="relative">
               <Lock className="absolute right-3 top-3 text-slate-400 w-4 h-4" />
-              <input 
-                type="password" 
-                name="code"
-                value={formData.code}
-                onChange={handleChange}
-                maxLength={4}
-                className="w-full bg-slate-50 border border-slate-300 rounded-lg py-2.5 px-10 outline-none focus:ring-2 focus:ring-blue-500 text-lg tracking-widest"
-                placeholder="****"
-                required
-                disabled={!!lockoutTime}
-              />
+              <input type="password" name="code" value={formData.code} onChange={handleChange} maxLength={4} className="w-full bg-slate-50 border border-slate-300 rounded-lg py-2.5 px-10 outline-none focus:ring-2 focus:ring-blue-500 text-lg tracking-widest" placeholder="****" required disabled={!!lockoutTime} />
             </div>
           </div>
 
-          <button 
-            type="submit" 
-            disabled={loading || !!lockoutTime}
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg transition-all active:scale-95 disabled:opacity-50 disabled:active:scale-100 shadow-lg shadow-blue-200 mt-4"
-          >
+          <button type="submit" disabled={loading || !!lockoutTime} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg transition-all active:scale-95 disabled:opacity-50 disabled:active:scale-100 shadow-lg shadow-blue-200 mt-4">
             {loading ? 'جاري التحقق...' : 'تسجيل الدخول'}
           </button>
 
