@@ -7,10 +7,12 @@ import { supabase } from '@/lib/supabase';
 import { 
   Lock, LogOut, Maximize, Volume2, VolumeX, Bell, 
   Activity, Ban, Clock, User, ZoomIn, ZoomOut, AlertTriangle, 
-  ArrowRightLeft, Users, Settings2, LayoutGrid, Type, Monitor, MoveHorizontal, Tv
+  ArrowRightLeft, Settings2, LayoutGrid, Type, Monitor, MoveHorizontal,
+  Expand, Shrink
 } from 'lucide-react';
-import { toArabicNumbers, getArabicDate, getArabicTime, playSequentialAudio, playAudio } from '@/lib/utils'; 
+import { toArabicNumbers, playSequentialAudio, playAudio } from '@/lib/utils'; 
 
+// --- ثوابت الفيديو ---
 const PATH_PREFIX = '/videos'; 
 const VIDEOS_COUNT = 28; 
 const LOCAL_VIDEOS = Array.from({ length: VIDEOS_COUNT }, (_, i) => `${PATH_PREFIX}/${i + 1}.mp4`);
@@ -18,289 +20,386 @@ const LOCAL_VIDEOS = Array.from({ length: VIDEOS_COUNT }, (_, i) => `${PATH_PREF
 export default function DisplayScreen() {
   const router = useRouter();
   
-  // Data State
-  const [screensList, setScreensList] = useState<any[]>([]);
-  const [selectedScreen, setSelectedScreen] = useState<any>(null); // الشاشة المختارة
-  const [clinics, setClinics] = useState<any[]>([]);
-  
-  // UI State
-  const [viewMode, setViewMode] = useState<'selection' | 'display'>('selection');
-  const [passwordInput, setPasswordInput] = useState('');
-  const [isClient, setIsClient] = useState(false);
-  const [isFullscreen, setIsFullscreen] = useState(false);
-  const [isMuted, setIsMuted] = useState(false); 
-  const [currentTime, setCurrentTime] = useState(new Date());
-  const [isZoomed, setIsZoomed] = useState(false);
-  
-  // Settings & Helpers
+  // --- البيانات ---
+  const { clinics, loading: clinicsLoading } = useClinics();
   const { doctors } = useDoctors(); 
   const { settings } = useSettings();
-  const [currentDoctorIndex, setCurrentDoctorIndex] = useState(0);
+
+  // --- الحالة العامة ---
+  const [isClient, setIsClient] = useState(false);
+  const [selectedScreen, setSelectedScreen] = useState(1);
+  const [password, setPassword] = useState('');
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isMuted, setIsMuted] = useState(false); 
+  const [currentTime, setCurrentTime] = useState(new Date());
+  
+  // --- إعدادات العرض (التحكم الكامل) ---
   const [showDisplaySettings, setShowDisplaySettings] = useState(false);
-  const [displayConfig, setDisplayConfig] = useState({ aspectRatio: 'aspect-[3/2]', gridCols: 2, textSize: 'normal', gapSize: 'normal' });
+  const [displayConfig, setDisplayConfig] = useState({
+    gridCols: 3,             // عدد الأعمدة الافتراضي
+    textSize: 'normal',      // حجم الخط
+    aspectRatio: 'aspect-video', // نسبة أبعاد الكارت
+    gapSize: 'normal',       // المسافات بين الكروت
+    paddingSize: 'normal',   // الحواف الداخلية للشاشة
+    showDoctor: true,        // إظهار/إخفاء قسم الطبيب
+    showVideo: true,         // إظهار/إخفاء الفيديو
+    splitRatio: 30,          // نسبة تقسيم الشاشة (للفيديو)
+  });
+
+  // --- حالة الفيديو ---
   const [currentVideoIndex, setCurrentVideoIndex] = useState(0);
   const videoRef = useRef<HTMLVideoElement>(null);
-  const [notification, setNotification] = useState<any>(null);
-  const prevClinicsRef = useRef<any[]>([]);
 
-  useEffect(() => { setIsClient(true); fetchScreens(); }, []);
-  useEffect(() => { const t = setInterval(() => setCurrentTime(new Date()), 1000); return () => clearInterval(t); }, []);
+  // --- التنبيهات ---
+  const [notification, setNotification] = useState<{ 
+    show: boolean; 
+    message: string; 
+    type: 'normal' | 'emergency' | 'transfer';
+    targetClinicId?: string;
+  } | null>(null);
+  
+  const prevClinicsRef = useRef<typeof clinics>([]);
+  const isFirstLoad = useRef(true);
+  const [currentDoctorIndex, setCurrentDoctorIndex] = useState(0);
 
-  // Fetch Available Screens
-  const fetchScreens = async () => {
-    const { data } = await supabase.from('screens').select('*').eq('is_active', true).order('screen_number');
-    setScreensList(data || []);
-  };
+  // --- تهيئة ---
+  useEffect(() => { setIsClient(true); }, []);
 
-  // Login to Specific Screen
-  const handleScreenLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedScreen) return;
-
-    if (passwordInput === selectedScreen.password) {
-      setViewMode('display');
-      fetchScreenClinics(selectedScreen.id);
-    } else {
-      alert('كلمة المرور غير صحيحة');
-    }
-  };
-
-  // Fetch Clinics for the logged-in screen
-  const fetchScreenClinics = async (screenId: string) => {
-    // 1. Get Clinic IDs linked to this screen
-    const { data: relations } = await supabase.from('clinic_screens').select('clinic_id').eq('screen_id', screenId);
-    const clinicIds = relations?.map((r: any) => r.clinic_id) || [];
-
-    if (clinicIds.length > 0) {
-      // 2. Fetch Clinics Data
-      const { data: clinicsData } = await supabase.from('clinics').select('*').in('id', clinicIds).order('clinic_number');
-      setClinics(clinicsData || []);
-    } else {
-      setClinics([]);
-    }
-  };
-
-  // Real-time Updates for Clinics
+  // ساعة وتاريخ
   useEffect(() => {
-    if (viewMode !== 'display' || !selectedScreen) return;
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
 
-    const channel = supabase.channel('display-updates')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'clinics' }, () => {
-        fetchScreenClinics(selectedScreen.id);
+  // تدوير الأطباء
+  useEffect(() => {
+    if (doctors.length > 0) {
+      const timer = setInterval(() => setCurrentDoctorIndex(p => (p + 1) % doctors.length), 15000);
+      return () => clearInterval(timer);
+    }
+  }, [doctors]);
+
+  // --- دوال مساعدة للتنسيق ---
+  const getFormattedDateTime = (date: Date) => {
+    const dateStr = new Intl.DateTimeFormat('ar-EG', { day: 'numeric', month: 'long', year: 'numeric' }).format(date);
+    const timeStr = new Intl.DateTimeFormat('ar-EG', { hour: '2-digit', minute: '2-digit', hour12: true }).format(date);
+    // تحويل "ص" إلى "صباحاً" و "م" إلى "مساءً" يدوياً إذا لزم الأمر، أو الاعتماد على المتصفح
+    const fullTime = timeStr.replace('ص', 'صباحاً').replace('م', 'مساءً').replace('AM', 'صباحاً').replace('PM', 'مساءً');
+    return `${dateStr} الساعة ${fullTime}`;
+  };
+
+  const getGridClass = () => {
+    switch(displayConfig.gridCols) {
+      case 1: return 'grid-cols-1';
+      case 2: return 'grid-cols-2';
+      case 3: return 'grid-cols-3';
+      case 4: return 'grid-cols-4';
+      case 5: return 'grid-cols-5';
+      default: return 'grid-cols-3';
+    }
+  };
+
+  const getGapClass = () => {
+    switch(displayConfig.gapSize) {
+      case 'none': return 'gap-0';
+      case 'small': return 'gap-2';
+      case 'normal': return 'gap-4';
+      case 'large': return 'gap-8';
+      default: return 'gap-4';
+    }
+  };
+
+  const getPaddingClass = () => {
+    switch(displayConfig.paddingSize) {
+      case 'none': return 'p-0';
+      case 'small': return 'p-2';
+      case 'normal': return 'p-4';
+      case 'large': return 'p-8';
+      default: return 'p-4';
+    }
+  };
+
+  const getTextClasses = () => {
+    switch(displayConfig.textSize) {
+      case 'xs': return { title: 'text-lg', number: 'text-4xl', meta: 'text-xs' };
+      case 'small': return { title: 'text-xl', number: 'text-6xl', meta: 'text-sm' };
+      case 'normal': return { title: 'text-3xl', number: 'text-8xl', meta: 'text-lg' };
+      case 'large': return { title: 'text-4xl', number: 'text-9xl', meta: 'text-xl' };
+      case 'xl': return { title: 'text-5xl', number: 'text-[10rem]', meta: 'text-2xl' };
+      default: return { title: 'text-3xl', number: 'text-8xl', meta: 'text-lg' };
+    }
+  };
+  const textStyles = getTextClasses();
+
+  // --- تشغيل الفيديو ---
+  const handleVideoEnded = () => setCurrentVideoIndex(prev => (prev + 1) % LOCAL_VIDEOS.length);
+  useEffect(() => {
+    if (videoRef.current) {
+        videoRef.current.load();
+        videoRef.current.play().catch(console.error);
+    }
+  }, [currentVideoIndex]);
+
+  // --- Realtime (نفس المنطق السابق) ---
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const channel = supabase.channel('display_updates')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'queue', filter: 'is_emergency=eq.true' }, payload => {
+          const cName = clinics.find(c => c.id === payload.new.clinic_id)?.clinic_name || 'العيادة';
+          setNotification({ show: true, message: `⚠️ طوارئ: ${cName}`, type: 'emergency' });
+          if(!isMuted) playAudio('/audio/emergency.mp3').catch(console.error);
+          setTimeout(() => setNotification(null), 15000);
       })
       .subscribe();
-
     return () => { supabase.removeChannel(channel); };
-  }, [viewMode, selectedScreen]);
+  }, [isAuthenticated, clinics, isMuted]);
 
-  // Audio & Notification Logic (Same as before)
+  // التنبيه عند تغير الأرقام
   useEffect(() => {
-    if (viewMode !== 'display') return;
+    if (!isAuthenticated || clinicsLoading) return;
+    if (isFirstLoad.current && clinics.length > 0) { prevClinicsRef.current = clinics; isFirstLoad.current = false; return; }
     
-    // Check for changes to trigger audio
-    clinics.forEach(clinic => {
-      const prev = prevClinicsRef.current.find(c => c.id === clinic.id);
+    clinics.forEach((clinic) => {
+      const prev = prevClinicsRef.current.find((c) => c.id === clinic.id);
       if (prev && clinic.last_call_time !== prev.last_call_time && clinic.last_call_time) {
-        triggerAlert(clinic);
+         setNotification({ show: true, message: `العميل رقم ${toArabicNumbers(clinic.current_number)} -> ${clinic.clinic_name}`, type: 'normal', targetClinicId: clinic.id });
+         if (!isMuted) playSequentialAudio(['/audio/ding.mp3', `/audio/${clinic.current_number}.mp3`, `/audio/clinic${clinic.clinic_number}.mp3`]).catch(console.error);
+         setTimeout(() => setNotification(null), 10000);
       }
     });
     prevClinicsRef.current = clinics;
-  }, [clinics, viewMode]);
+  }, [clinics, isAuthenticated, isMuted, clinicsLoading]);
 
-  // Helpers
-  const triggerAlert = async (clinic: any) => {
-    setNotification({ show: true, message: `العميل رقم ${toArabicNumbers(clinic.current_number)} -> ${clinic.clinic_name}`, type: 'normal', targetClinicId: clinic.id });
-    if (!isMuted) { try { await playSequentialAudio(['/audio/ding.mp3', `/audio/${clinic.current_number}.mp3`, `/audio/clinic${clinic.clinic_number}.mp3`]); } catch (e) { console.error(e); } }
-    setTimeout(() => setNotification(null), 10000);
-  };
-  
-  const handleVideoEnded = () => setCurrentVideoIndex(p => (p + 1) % LOCAL_VIDEOS.length);
-  const handleFullscreen = () => { if (!document.fullscreenElement) { document.documentElement.requestFullscreen(); setIsFullscreen(true); } else { document.exitFullscreen(); setIsFullscreen(false); } };
-
-  // --- RENDER ---
-
+  // --- شاشة تسجيل الدخول ---
   if (!isClient) return <div className="flex h-screen items-center justify-center bg-slate-900 text-white">جاري التحميل...</div>;
 
-  // MODE 1: SCREEN SELECTION
-  if (viewMode === 'selection') {
+  if (!isAuthenticated) {
     return (
-      <div className="min-h-screen bg-slate-900 text-white font-cairo flex flex-col items-center justify-center p-8 relative">
-        {/* Background Pattern */}
-        <div className="absolute inset-0 opacity-10 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-blue-500 via-slate-900 to-black pointer-events-none"></div>
-        
-        <h1 className="text-4xl font-bold mb-12 flex items-center gap-4 z-10">
-          <Monitor className="w-12 h-12 text-blue-500" />
-          شاشات العرض المتاحة
-        </h1>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 w-full max-w-5xl z-10">
-          {screensList.map(screen => (
-            <button 
-              key={screen.id}
-              onClick={() => setSelectedScreen(screen)}
-              className="bg-slate-800 hover:bg-blue-900 border border-slate-700 hover:border-blue-500 p-8 rounded-2xl transition-all group flex flex-col items-center gap-4 shadow-xl hover:scale-105"
-            >
-              <div className="w-20 h-20 bg-slate-700 rounded-full flex items-center justify-center group-hover:bg-blue-600 transition-colors">
-                <Tv className="w-10 h-10 text-slate-300 group-hover:text-white" />
-              </div>
-              <h2 className="text-2xl font-bold">{screen.screen_name}</h2>
-              <span className="text-slate-400 bg-slate-900 px-3 py-1 rounded text-sm">شاشة رقم {screen.screen_number}</span>
-            </button>
-          ))}
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 to-blue-900 flex items-center justify-center font-cairo">
+        <div className="bg-white/10 backdrop-blur-lg p-8 rounded-2xl border border-white/20 shadow-2xl w-full max-w-md text-center">
+          <Monitor className="w-16 h-16 text-blue-400 mx-auto mb-6" />
+          <h1 className="text-3xl font-bold text-white mb-8">شاشة العرض المركزية</h1>
+          <form onSubmit={(e) => { e.preventDefault(); if(password === 'screen123') setIsAuthenticated(true); else alert('خطأ'); }} className="space-y-6">
+             <select className="w-full p-3 rounded-lg bg-slate-800 text-white border border-slate-600" value={selectedScreen} onChange={e=>setSelectedScreen(Number(e.target.value))}>
+                {[1,2,3,4,5].map(n => <option key={n} value={n}>شاشة رقم {n}</option>)}
+             </select>
+             <input type="password" placeholder="كلمة المرور" className="w-full p-3 rounded-lg bg-slate-800 text-white border border-slate-600" value={password} onChange={e=>setPassword(e.target.value)} autoFocus/>
+             <button className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-lg transition">دخول</button>
+          </form>
         </div>
-
-        {/* Login Modal */}
-        {selectedScreen && (
-          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50">
-            <div className="bg-white text-slate-900 p-8 rounded-2xl shadow-2xl w-full max-w-md relative animate-in zoom-in-95">
-              <button onClick={() => { setSelectedScreen(null); setPasswordInput(''); }} className="absolute top-4 left-4 text-slate-400 hover:text-red-500"><Activity className="rotate-45"/></button>
-              <h3 className="text-2xl font-bold mb-6 text-center">دخول: {selectedScreen.screen_name}</h3>
-              <form onSubmit={handleScreenLogin} className="space-y-4">
-                <input 
-                  type="password" 
-                  autoFocus
-                  placeholder="أدخل كلمة مرور الشاشة" 
-                  value={passwordInput} 
-                  onChange={e => setPasswordInput(e.target.value)} 
-                  className="w-full text-center text-2xl font-bold border-2 border-slate-200 rounded-xl py-4 focus:border-blue-600 outline-none tracking-widest"
-                />
-                <button className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-xl text-lg">دخول العرض</button>
-              </form>
-            </div>
-          </div>
-        )}
       </div>
     );
   }
 
-  // MODE 2: DISPLAY CONTENT (The actual screen)
+  // تصفية العيادات للشاشة المختارة
+  const screenClinics = clinics.filter(c => c.screen_id === clinics[selectedScreen - 1]?.screen_id);
+  const currentDoctor = doctors[currentDoctorIndex];
+
+  // --- الشاشة الرئيسية ---
   return (
-    <div className={`min-h-screen bg-gray-900 text-white overflow-hidden relative flex flex-col font-cairo`}>
-      {/* Notification Slider */}
-      <div className={`fixed top-0 left-0 w-full z-50 transform transition-transform duration-500 ease-out ${notification ? 'translate-y-0' : '-translate-y-full'}`}>
-        <div className={`shadow-2xl border-b-8 border-white p-4 flex justify-center items-center h-28 bg-gradient-to-r from-amber-500 to-orange-600`}>
-          <div className="flex items-center gap-4 w-full max-w-7xl justify-center">
-            <Bell className="w-8 h-8 text-white animate-bounce" />
-            <h2 className="text-4xl font-black text-white drop-shadow-lg">{notification?.message}</h2>
-          </div>
-        </div>
-      </div>
-
-      {/* Top Bar (Simplified) */}
-      <div className="h-20 bg-slate-800 border-b border-slate-700 flex items-center justify-between px-6 shadow-md z-40">
-        <div className="flex items-center gap-4">
-          <div className="bg-blue-600 px-4 py-2 rounded-lg font-bold">{selectedScreen?.screen_name}</div>
-          <div className="h-8 w-[1px] bg-slate-600"></div>
-          <div className="flex items-center gap-4 text-xl font-mono text-slate-300">
-            <Clock className="w-5 h-5 text-blue-400"/> {getArabicTime(currentTime)}
-          </div>
-        </div>
+    <div className={`min-h-screen bg-slate-900 text-white overflow-hidden flex flex-col font-cairo relative`}>
+      
+      {/* 1. الشريط العلوي (تم التحديث حسب الطلب) */}
+      <header className="bg-gradient-to-r from-blue-900 via-slate-800 to-slate-900 border-b border-slate-700 h-24 flex items-center justify-between px-6 shadow-lg z-20 shrink-0">
         
-        <div className="flex items-center gap-2">
-          {/* Settings Toggle */}
-          <button onClick={() => setShowDisplaySettings(!showDisplaySettings)} className="p-2 hover:bg-slate-700 rounded"><Settings2 className="w-6 h-6 text-slate-400"/></button>
-          
-          {/* Controls */}
-          <button onClick={() => setIsZoomed(!isZoomed)} className="p-2 hover:bg-slate-700 rounded"><ZoomIn className="w-6 h-6 text-slate-400"/></button>
-          <button onClick={() => setIsMuted(!isMuted)} className="p-2 hover:bg-slate-700 rounded">{isMuted ? <VolumeX className="text-red-400"/> : <Volume2 className="text-slate-400"/>}</button>
-          <button onClick={handleFullscreen} className="p-2 hover:bg-slate-700 rounded"><Maximize className="text-slate-400"/></button>
-          
-          {/* Logout Button */}
-          <button onClick={() => { setViewMode('selection'); setSelectedScreen(null); setPasswordInput(''); }} className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 ml-4">
-            <LogOut className="w-4 h-4"/> خروج
-          </button>
+        {/* يمين: اسم المركز */}
+        <div className="flex items-center gap-4">
+           <div className="bg-blue-600 p-2 rounded-lg shadow-lg shadow-blue-500/20">
+             <Activity className="w-8 h-8 text-white" />
+           </div>
+           <h1 className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-l from-white to-blue-200 drop-shadow-sm">
+             {settings?.center_name || 'المركز الطبي الذكي'}
+           </h1>
         </div>
 
-        {/* Display Settings Popup */}
-        {showDisplaySettings && (
-          <div className="absolute top-20 left-6 bg-slate-800 border border-slate-600 p-4 rounded-xl shadow-xl w-64 z-50">
-             <div className="space-y-4">
-                <div>
-                  <label className="text-xs text-slate-400 block mb-1">الأعمدة</label>
-                  <div className="flex gap-1">{[1, 2, 3].map(n => <button key={n} onClick={() => setDisplayConfig({...displayConfig, gridCols: n})} className={`flex-1 py-1 text-sm border rounded ${displayConfig.gridCols === n ? 'bg-blue-600 border-blue-500' : 'border-slate-600'}`}>{n}</button>)}</div>
-                </div>
-                <div>
-                  <label className="text-xs text-slate-400 block mb-1">حجم الخط</label>
-                  <div className="flex gap-1">{['small', 'normal', 'large'].map(s => <button key={s} onClick={() => setDisplayConfig({...displayConfig, textSize: s})} className={`flex-1 py-1 text-xs border rounded ${displayConfig.textSize === s ? 'bg-blue-600 border-blue-500' : 'border-slate-600'}`}>{s}</button>)}</div>
-                </div>
+        {/* وسط: التنبيهات (اختياري) أو فارغ */}
+        <div className="flex-1"></div>
+
+        {/* يسار: التاريخ والوقت + أدوات التحكم */}
+        <div className="flex items-center gap-6">
+           <div className="text-left">
+             <div className="text-2xl font-bold text-blue-300 font-mono tracking-wide">
+                {getFormattedDateTime(currentTime)}
              </div>
+           </div>
+           
+           <div className="h-10 w-px bg-slate-600 mx-2"></div>
+           
+           {/* أزرار التحكم السريعة */}
+           <div className="flex gap-2">
+              <button onClick={() => setShowDisplaySettings(!showDisplaySettings)} className={`p-2 rounded-lg transition ${showDisplaySettings ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'}`}><Settings2/></button>
+              <button onClick={() => setIsMuted(!isMuted)} className="p-2 bg-slate-800 text-slate-400 hover:text-white rounded-lg">{isMuted ? <VolumeX/> : <Volume2/>}</button>
+              <button onClick={() => { if(!document.fullscreenElement) document.documentElement.requestFullscreen(); else document.exitFullscreen(); }} className="p-2 bg-slate-800 text-slate-400 hover:text-white rounded-lg"><Maximize/></button>
+              <button onClick={() => { setIsAuthenticated(false); setPassword(''); }} className="p-2 bg-red-900/30 text-red-400 hover:bg-red-900/50 rounded-lg"><LogOut/></button>
+           </div>
+        </div>
+      </header>
+
+      {/* 2. نافذة الإعدادات العائمة (التحكم الكامل) */}
+      {showDisplaySettings && (
+        <div className="absolute top-28 left-6 w-80 bg-slate-800/95 backdrop-blur border border-slate-600 rounded-xl shadow-2xl z-50 p-4 animate-in fade-in slide-in-from-top-4">
+          <div className="flex justify-between items-center mb-4 border-b border-slate-600 pb-2">
+             <h3 className="font-bold flex items-center gap-2"><Settings2 className="w-4 h-4 text-blue-400"/> إعدادات العرض</h3>
+             <button onClick={() => setShowDisplaySettings(false)} className="text-slate-400 hover:text-white">✕</button>
+          </div>
+          
+          <div className="space-y-4 max-h-[70vh] overflow-y-auto custom-scrollbar pr-2">
+            {/* الأعمدة */}
+            <div>
+              <label className="text-xs text-slate-400 mb-1 block">عدد الأعمدة</label>
+              <div className="flex gap-1">
+                {[1,2,3,4,5].map(n => (
+                  <button key={n} onClick={() => setDisplayConfig({...displayConfig, gridCols: n})} className={`flex-1 py-1 text-sm rounded border ${displayConfig.gridCols === n ? 'bg-blue-600 border-blue-500 text-white' : 'bg-slate-700 border-slate-600 text-slate-300'}`}>{n}</button>
+                ))}
+              </div>
+            </div>
+
+            {/* حجم الخط */}
+            <div>
+              <label className="text-xs text-slate-400 mb-1 block">حجم الخط</label>
+              <div className="grid grid-cols-3 gap-1">
+                {['xs','small','normal','large','xl'].map(s => (
+                  <button key={s} onClick={() => setDisplayConfig({...displayConfig, textSize: s})} className={`py-1 text-xs rounded border ${displayConfig.textSize === s ? 'bg-blue-600 border-blue-500' : 'bg-slate-700 border-slate-600'}`}>{s}</button>
+                ))}
+              </div>
+            </div>
+
+            {/* المسافات */}
+            <div>
+              <label className="text-xs text-slate-400 mb-1 block">المسافات بين الكروت</label>
+              <div className="flex gap-1">
+                 {['none','small','normal','large'].map(s => (
+                   <button key={s} onClick={() => setDisplayConfig({...displayConfig, gapSize: s})} className={`flex-1 py-1 text-xs rounded border ${displayConfig.gapSize === s ? 'bg-blue-600' : 'bg-slate-700'}`}>{s}</button>
+                 ))}
+              </div>
+            </div>
+
+            {/* الحواف */}
+            <div>
+              <label className="text-xs text-slate-400 mb-1 block">حواف الشاشة (Padding)</label>
+              <div className="flex gap-1">
+                 {['none','small','normal','large'].map(s => (
+                   <button key={s} onClick={() => setDisplayConfig({...displayConfig, paddingSize: s})} className={`flex-1 py-1 text-xs rounded border ${displayConfig.paddingSize === s ? 'bg-blue-600' : 'bg-slate-700'}`}>{s}</button>
+                 ))}
+              </div>
+            </div>
+
+            {/* نسبة أبعاد الكارت */}
+            <div>
+               <label className="text-xs text-slate-400 mb-1 block">أبعاد الكارت</label>
+               <select className="w-full bg-slate-700 border border-slate-600 rounded p-1 text-sm" value={displayConfig.aspectRatio} onChange={(e) => setDisplayConfig({...displayConfig, aspectRatio: e.target.value})}>
+                 <option value="aspect-auto">تلقائي (Auto)</option>
+                 <option value="aspect-video">عريض (16:9)</option>
+                 <option value="aspect-square">مربع (1:1)</option>
+                 <option value="aspect-[4/3]">تقليدي (4:3)</option>
+                 <option value="aspect-[3/4]">طولي (3:4)</option>
+               </select>
+            </div>
+
+            {/* إظهار/إخفاء أقسام */}
+            <div className="pt-2 border-t border-slate-600">
+               <label className="flex items-center justify-between text-sm cursor-pointer hover:bg-slate-700 p-2 rounded">
+                 <span>عرض الفيديو الجانبي</span>
+                 <input type="checkbox" checked={displayConfig.showVideo} onChange={(e) => setDisplayConfig({...displayConfig, showVideo: e.target.checked})} className="accent-blue-600"/>
+               </label>
+               <label className="flex items-center justify-between text-sm cursor-pointer hover:bg-slate-700 p-2 rounded">
+                 <span>عرض قسم الطبيب</span>
+                 <input type="checkbox" checked={displayConfig.showDoctor} onChange={(e) => setDisplayConfig({...displayConfig, showDoctor: e.target.checked})} className="accent-blue-600"/>
+               </label>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 3. منطقة المحتوى الرئيسية */}
+      <div className="flex-1 flex overflow-hidden">
+        
+        {/* منطقة الكروت (العيادات) */}
+        <div className={`transition-all duration-500 flex flex-col ${displayConfig.showVideo ? 'w-2/3 border-l border-slate-700' : 'w-full'}`}>
+           <div className={`flex-1 overflow-y-auto ${getPaddingClass()}`}>
+              <div className={`grid ${getGridClass()} ${getGapClass()}`}>
+                 {screenClinics.map(clinic => (
+                   <div key={clinic.id} className={`relative bg-white text-slate-900 rounded-xl overflow-hidden shadow-xl flex flex-col ${displayConfig.aspectRatio} ${clinic.is_active ? '' : 'opacity-60 grayscale'} ${notification?.targetClinicId === clinic.id ? 'ring-8 ring-yellow-400 animate-pulse' : ''}`}>
+                      <div className={`absolute top-0 right-0 bottom-0 w-3 ${clinic.is_active ? 'bg-blue-600' : 'bg-slate-400'}`}></div>
+                      
+                      <div className="flex-1 flex flex-col items-center justify-center p-4 text-center">
+                         <h2 className={`font-bold mb-2 ${textStyles.title} text-slate-800`}>{clinic.clinic_name}</h2>
+                         <div className={`font-black text-blue-600 leading-none ${textStyles.number}`}>
+                            {toArabicNumbers(clinic.current_number)}
+                         </div>
+                      </div>
+                      
+                      <div className="bg-slate-100 p-3 flex justify-between items-center border-t border-slate-200">
+                         <div className={`font-bold ${textStyles.meta} ${clinic.is_active ? 'text-green-600' : 'text-slate-500'}`}>
+                           {clinic.is_active ? '● متاح الآن' : '● مغلق'}
+                         </div>
+                         <div className={`font-mono text-slate-500 dir-ltr ${textStyles.meta}`}>
+                           {clinic.last_call_time ? new Date(clinic.last_call_time).toLocaleTimeString('ar-EG', {hour:'2-digit', minute:'2-digit'}) : '--:--'}
+                         </div>
+                      </div>
+                   </div>
+                 ))}
+              </div>
+           </div>
+
+           {/* قسم الطبيب (السفلي) */}
+           {displayConfig.showDoctor && currentDoctor && (
+             <div className="h-40 bg-slate-800 border-t border-slate-700 flex items-center px-8 shrink-0 relative overflow-hidden">
+                <div className="absolute right-0 top-0 bg-blue-600 text-white text-xs px-3 py-1 rounded-bl-lg z-10 font-bold">الطبيب المناوب</div>
+                <div className="w-24 h-24 rounded-full border-4 border-blue-500 overflow-hidden bg-white relative z-10 shrink-0">
+                   {(currentDoctor as any).image_url ? (
+                      <img src={(currentDoctor as any).image_url} className="w-full h-full object-cover" />
+                   ) : (
+                      <User className="w-full h-full p-4 text-slate-300"/>
+                   )}
+                </div>
+                <div className="mr-6 z-10">
+                   <h3 className="text-3xl font-bold text-white mb-1">{currentDoctor.full_name}</h3>
+                   <p className="text-xl text-blue-300">{currentDoctor.specialization}</p>
+                </div>
+                <User className="absolute left-10 -bottom-10 w-64 h-64 text-white/5 rotate-12"/>
+             </div>
+           )}
+        </div>
+
+        {/* منطقة الفيديو (اختياري) */}
+        {displayConfig.showVideo && (
+          <div className="w-1/3 bg-black relative flex items-center justify-center">
+             <video ref={videoRef} className="w-full h-full object-contain" src={LOCAL_VIDEOS[currentVideoIndex]} muted={isMuted} onEnded={handleVideoEnded} autoPlay playsInline />
           </div>
         )}
       </div>
 
-      {/* Main Content: Split View */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Left: Clinics Grid */}
-        <div className={`${isZoomed ? 'w-1/2' : 'w-1/3'} border-l border-slate-700 flex flex-col transition-all duration-500`}>
-          <div className="flex-1 p-4 overflow-y-auto bg-slate-800/50">
-            {clinics.length > 0 ? (
-              <div className={`grid gap-4 ${displayConfig.gridCols === 1 ? 'grid-cols-1' : displayConfig.gridCols === 2 ? 'grid-cols-2' : 'grid-cols-3'}`}>
-                {clinics.map(clinic => (
-                  <div key={clinic.id} className={`bg-white rounded-xl overflow-hidden flex flex-col justify-between shadow-lg relative ${clinic.is_active ? '' : 'opacity-60 grayscale'} ${displayConfig.aspectRatio} ${notification?.targetClinicId === clinic.id ? 'animate-pulse ring-4 ring-yellow-400' : ''}`}>
-                    <div className={`h-2 w-full ${clinic.is_active ? 'bg-blue-600' : 'bg-slate-400'}`}></div>
-                    <div className="p-4 flex-1 flex flex-col items-center justify-center text-center">
-                      <h3 className={`font-bold text-slate-800 mb-2 ${displayConfig.textSize === 'large' ? 'text-3xl' : 'text-xl'}`}>{clinic.clinic_name}</h3>
-                      <span className={`font-black text-blue-600 ${displayConfig.textSize === 'large' ? 'text-8xl' : 'text-6xl'}`}>{toArabicNumbers(clinic.current_number)}</span>
-                    </div>
-                    <div className="bg-slate-50 p-2 text-center border-t text-slate-500 text-xs font-mono">
-                      {clinic.is_active ? 'نشطة' : 'متوقفة'}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="h-full flex items-center justify-center text-slate-500">لا توجد عيادات مرتبطة بهذه الشاشة</div>
-            )}
-          </div>
-          
-          {/* Doctor Info Footer */}
-          <div className="h-48 bg-gradient-to-r from-slate-900 to-slate-800 border-t border-slate-700 relative overflow-hidden flex items-center p-6">
-             {doctors.length > 0 && doctors[currentDoctorIndex] ? (
-               <div className="flex items-center gap-6 animate-fade-in w-full">
-                 <div className="w-24 h-24 rounded-full border-2 border-blue-500 overflow-hidden bg-white flex items-center justify-center">
-{/* استخدام (as any) يجبر النظام على تجاهل فحص النوع لهذا السطر */}
-{(doctors[currentDoctorIndex] as any).image_url ? (
-  <img src={(doctors[currentDoctorIndex] as any).image_url} className="w-full h-full object-cover"/>
-) : (
-  <User className="w-12 h-12 text-slate-300"/>
-)}                 </div>
-                 <div>
-                   <h3 className="text-2xl font-bold text-white mb-1">{doctors[currentDoctorIndex].full_name}</h3>
-                   <p className="text-blue-400 flex items-center gap-2"><Activity className="w-4 h-4"/> {doctors[currentDoctorIndex].specialization}</p>
-                 </div>
-               </div>
-             ) : <div className="text-slate-500 w-full text-center">جاري تحميل بيانات الأطباء...</div>}
-          </div>
-        </div>
-
-        {/* Right: Video Player */}
-        <div className={`${isZoomed ? 'w-1/2' : 'w-2/3'} bg-black relative flex items-center justify-center transition-all duration-500`}>
-          <video 
-            ref={videoRef}
-            className="w-full h-full object-contain" 
-            muted={isMuted} 
-            autoPlay
-            playsInline
-            src={LOCAL_VIDEOS[currentVideoIndex]} 
-            onEnded={handleVideoEnded}
-          />
-        </div>
+      {/* شريط الأخبار السفلي */}
+      <div className="h-12 bg-blue-900 flex items-center shrink-0 border-t border-blue-700 relative z-30">
+         <div className="bg-blue-800 h-full px-6 flex items-center font-bold text-lg z-20 shadow-xl">
+           أخبار المركز
+         </div>
+         <div className="flex-1 overflow-hidden relative h-full flex items-center">
+            <div className="whitespace-nowrap animate-marquee text-xl px-4 absolute w-full font-medium" style={{ animationDuration: `${settings?.news_ticker_speed || 30}s` }}>
+               {settings?.news_ticker_content || 'مرحباً بكم في المركز الطبي... نتمنى لكم الشفاء العاجل'}
+            </div>
+         </div>
       </div>
 
-      {/* Ticker */}
-      <div className="h-12 bg-blue-900 border-t border-blue-800 flex items-center overflow-hidden">
-        <div className="bg-blue-800 h-full px-6 flex items-center shadow-xl z-10"><span className="font-bold text-white">إعلانات</span></div>
-        <div className="flex-1 overflow-hidden relative h-full">
-           <div className="absolute top-2 whitespace-nowrap animate-marquee text-lg font-medium px-4 w-full">
-             {settings?.news_ticker_content || 'مرحباً بكم في المركز الطبي...'}
+      {/* أنماط CSS إضافية */}
+      <style jsx global>{`
+         @keyframes marquee { 0% { transform: translateX(100%); } 100% { transform: translateX(-100%); } }
+         .animate-marquee { animation: marquee linear infinite; }
+         .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+         .custom-scrollbar::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
+      `}</style>
+
+      {/* التنبيه المنبثق (Notification Overlay) */}
+      {notification && (
+        <div className={`fixed top-24 inset-x-0 z-50 p-4 transition-transform duration-500 ${notification.show ? 'translate-y-0' : '-translate-y-full'}`}>
+           <div className={`mx-auto max-w-4xl shadow-2xl rounded-2xl p-6 border-4 flex items-center justify-center gap-6 ${notification.type === 'emergency' ? 'bg-red-600 border-red-800' : 'bg-amber-500 border-amber-700'}`}>
+              <Bell className="w-16 h-16 text-white animate-bounce" />
+              <h2 className="text-5xl font-black text-white drop-shadow-lg">{notification.message}</h2>
            </div>
         </div>
-      </div>
+      )}
 
-      <style jsx>{`
-        @keyframes marquee { 0% { transform: translateX(100%); } 100% { transform: translateX(-100%); } }
-        .animate-marquee { animation: marquee ${settings?.news_ticker_speed || 30}s linear infinite; }
-      `}</style>
     </div>
   );
 }
