@@ -13,10 +13,11 @@ export default function AdminConsultationsHistory() {
 
   useEffect(() => {
     const fetchHistory = async () => {
+      // 1. تحديث الاستعلام لجلب الوزن والطول أيضاً
       const { data } = await supabase
         .from('consultations')
-        .select('*, patient:patients(full_name), doctor:doctors(full_name)')
-        .eq('status', 'completed') // جلب المغلقة فقط
+        .select('*, patient:patients(full_name, weight_kg, height_cm), doctor:doctors(full_name)')
+        .eq('status', 'completed')
         .order('updated_at', { ascending: false });
       if (data) setHistory(data);
     };
@@ -32,26 +33,38 @@ export default function AdminConsultationsHistory() {
     }
   };
 
-  // تحويل البيانات المخزنة لعرضها في الروشتة
+  // 2. تحديث دالة تحويل البيانات لتناسب الروشتة الجديدة
   const parseData = (consultation: any) => {
     let meds = [];
     let msgs = [];
     try { meds = JSON.parse(consultation.medicines || '[]'); } catch {}
     try { msgs = JSON.parse(consultation.health_messages || '[]'); } catch { 
-       // دعم قديم لو كان نص عادي
        if(consultation.health_messages) msgs = [consultation.health_messages];
     }
     
     return {
+      // البيانات الأساسية
       patientName: consultation.patient?.full_name || 'غير معروف',
       doctorName: consultation.doctor?.full_name || 'طبيب',
+      centerName: 'المركز الطبي الذكي',
       date: new Date(consultation.updated_at).toLocaleDateString('ar-EG'),
+      
+      // البيانات الحيوية (التي تسببت في الخطأ لغيابها)
+      age: '-', // يمكن حسابه إذا توفر تاريخ الميلاد
+      weight: consultation.patient?.weight_kg,
+      height: consultation.patient?.height_cm,
+      
+      // المحتوى الطبي
+      complaint: consultation.complaint_text || 'لا توجد شكوى مسجلة', // <--- هذا هو الحقل الناقص
       diagnosis: consultation.response_text?.split('\n')[0]?.replace('التشخيص: ', '') || 'غير محدد',
       medicines: meds,
       tests: consultation.tests ? consultation.tests.split(',') : [],
       imaging: consultation.imaging ? consultation.imaging.split(',') : [],
       healthMessages: msgs,
-      notes: consultation.response_text
+      notes: consultation.response_text,
+      
+      // لا يوجد تاريخ متابعة في الأرشيف القديم، يمكن تركه فارغاً
+      followUpDate: undefined 
     };
   };
 
@@ -118,6 +131,7 @@ export default function AdminConsultationsHistory() {
               </div>
               
               <div className="flex-1 overflow-auto bg-slate-200 p-8 flex justify-center">
+                 {/* تمرير البيانات المعالجة للمكون */}
                  <PrescriptionView ref={printRef} {...parseData(selected)} />
               </div>
            </div>
