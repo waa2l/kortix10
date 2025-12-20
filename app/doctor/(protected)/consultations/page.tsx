@@ -9,12 +9,12 @@ import {
 } from 'lucide-react';
 import { PrescriptionView } from '@/components/PrescriptionView'; 
 
-// --- Types (تم تحديث هذا الجزء) ---
+// --- Types ---
 type PatientData = {
   full_name: string;
   gender: string;
-  phone?: string; // <-- تمت الإضافة
-  email?: string; // <-- تمت الإضافة
+  phone?: string;
+  email?: string;
   age?: number;
   weight_kg?: number;
   height_cm?: number;
@@ -95,6 +95,7 @@ const getTimeElapsed = (dateString: string) => {
 
 export default function DoctorConsultationsPage() {
   const [currentDoctor, setCurrentDoctor] = useState<{id: string, full_name: string, specialization: string} | null>(null);
+  
   const [consultations, setConsultations] = useState<Consultation[]>([]);
   const [selectedConsultation, setSelectedConsultation] = useState<Consultation | null>(null);
   const [loading, setLoading] = useState(true);
@@ -155,11 +156,12 @@ export default function DoctorConsultationsPage() {
 
   const fetchConsultations = async () => {
     setLoading(true);
-    // select all from patients table to verify phone/email exists
     let query = supabase.from('consultations').select('*, patient:patients(*)');
     if (activeTab === 'inbox') {
+      // جلب الاستشارات المفتوحة الخاصة بتخصص الطبيب الحالي
       query = query.eq('status', 'open').eq('specialization', currentDoctor?.specialization); 
     } else {
+      // الأرشيف: الاستشارات التي أتمها هذا الطبيب
       query = query.eq('status', 'completed').eq('doctor_id', currentDoctor?.id);
     }
     const { data } = await query.order('created_at', { ascending: false });
@@ -179,19 +181,47 @@ export default function DoctorConsultationsPage() {
     if(m.data) setMedicinesList(m.data); if(h.data) setMessagesList(h.data);
   };
 
+  // --- تحديث مهم: جلب التخصصات من النص المفصول بفاصلة ---
   const fetchSettings = async () => {
-    const { data } = await supabase.from('system_settings').select('specializations').single();
-    if (data && data.specializations) setAvailableSpecializations(data.specializations.split(','));
+    // تأكد أن اسم الجدول هو settings أو system_settings حسب قاعدتك
+    const { data } = await supabase.from('settings').select('specializations').limit(1).single();
+    
+    if (data && data.specializations) {
+      // تحويل النص "باطنة,أطفال,عظام" إلى مصفوفة
+      const specsArray = data.specializations.split(',').map((s: string) => s.trim()).filter((s: string) => s !== '');
+      setAvailableSpecializations(specsArray);
+    } else {
+      // قيم افتراضية في حالة عدم وجود إعدادات
+      setAvailableSpecializations(['باطنة', 'أطفال', 'عظام', 'جلدية', 'أسنان']);
+    }
   };
 
+  // --- Actions ---
   const handleOpenConsultation = (consultation: Consultation) => { setSelectedConsultation(consultation); setViewMode('details'); };
   const handleSkip = () => { setConsultations(prev => prev.filter(c => c.id !== selectedConsultation?.id)); setSelectedConsultation(null); setViewMode('list'); setShowTransferModal(false); };
 
+  // --- تحديث مهم: منطق التحويل الجديد ---
   const handleTransfer = async (targetSpec: string) => {
     if (!selectedConsultation || !currentDoctor) return;
-    const note = `تم التحويل من تخصص ${currentDoctor.specialization} بواسطة د. ${currentDoctor.full_name}`;
-    const { error } = await supabase.from('consultations').update({ specialization: targetSpec, transfer_note: note }).eq('id', selectedConsultation.id);
-    if (!error) { alert(`تم التحويل إلى ${targetSpec}`); handleSkip(); } else { alert('حدث خطأ'); }
+    
+    const oldSpec = selectedConsultation.specialization;
+    // صيغة الملاحظة: تم التحويل من [القديم] إلى [الجديد] بواسطة د. [الاسم]
+    const note = `تم التحويل من تخصص ${oldSpec} إلى ${targetSpec} بواسطة د. ${currentDoctor.full_name}`;
+    
+    const { error } = await supabase.from('consultations')
+      .update({ 
+        specialization: targetSpec, // تغيير التخصص ليظهر للطبيب الآخر
+        transfer_note: note,        // تسجيل الملاحظة
+        status: 'open'              // التأكد أنها مفتوحة
+      })
+      .eq('id', selectedConsultation.id);
+    
+    if (!error) { 
+      alert(`تم تحويل الاستشارة بنجاح إلى عيادة ${targetSpec}`); 
+      handleSkip(); // إخفائها من أمام الطبيب الحالي
+    } else { 
+      alert('حدث خطأ أثناء التحويل'); 
+    }
   };
 
   const handleReport = async () => {
@@ -287,8 +317,8 @@ export default function DoctorConsultationsPage() {
     if (error) { alert('خطأ في الحفظ'); return; }
 
     // 2. Send Notifications (Email & WhatsApp)
-    const patientPhone = selectedConsultation.patient?.phone; // Now Valid
-    const patientEmail = selectedConsultation.patient?.email; // Now Valid
+    const patientPhone = selectedConsultation.patient?.phone;
+    const patientEmail = selectedConsultation.patient?.email;
 
     fetch('/api/send-notification', {
       method: 'POST',
@@ -393,12 +423,17 @@ export default function DoctorConsultationsPage() {
               )}
            </div>
 
+           {/* Transfer Modal */}
            {showTransferModal && (
              <div className="absolute inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
                <div className="bg-white p-6 rounded-2xl w-full max-w-sm animate-in zoom-in-95">
                  <h3 className="font-bold text-lg mb-4 text-center">تحويل الاستشارة</h3>
+                 <p className="text-sm text-slate-500 mb-4 text-center">اختر التخصص المناسب لتحويل الحالة إليه:</p>
                  <div className="space-y-2 max-h-60 overflow-y-auto">
-                   {availableSpecializations.filter(s => s !== currentDoctor.specialization).map((spec) => (
+                   {/* تصفية التخصصات لعرض التخصصات الأخرى فقط */}
+                   {availableSpecializations
+                     .filter(s => s !== currentDoctor.specialization)
+                     .map((spec) => (
                      <button key={spec} onClick={() => handleTransfer(spec.trim())} className="w-full p-3 text-right bg-slate-50 hover:bg-purple-50 hover:text-purple-700 rounded-xl border border-transparent hover:border-purple-200 transition font-bold">{spec.trim()}</button>
                    ))}
                  </div>
