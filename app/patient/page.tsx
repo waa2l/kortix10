@@ -1,15 +1,22 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import { useRouter } from 'next/navigation'; // للتوجيه
+import { supabase } from '@/lib/supabase'; // تأكد من استيراد عميل Supabase
 import { useClinics, useSettings } from '@/lib/hooks';
-import { User, Activity, Clock, Bell, Volume2, Search, ArrowRight, CheckCircle, AlertTriangle } from 'lucide-react';
+import { 
+  User, Activity, Clock, Bell, Volume2, Search, 
+  ArrowRight, CheckCircle, AlertTriangle, MessageSquare, FileText 
+} from 'lucide-react';
 import { toArabicNumbers, getArabicDate, playAudio } from '@/lib/utils';
+import { Toaster, toast } from 'sonner'; // مكتبة التنبيهات
 
 export default function PatientPage() {
+  const router = useRouter();
   const { clinics, loading } = useClinics();
   const { settings } = useSettings();
   
-  // States للمتابعة
+  // States للمتابعة (عيادات)
   const [selectedClinicId, setSelectedClinicId] = useState('');
   const [myTicketNumber, setMyTicketNumber] = useState('');
   const [isTracking, setIsTracking] = useState(false);
@@ -18,18 +25,62 @@ export default function PatientPage() {
   // Ref لمنع تكرار الصوت لنفس الرقم
   const lastAnnouncedNumberRef = useRef<number>(-1);
 
-  // --- Logic ---
+  // --- 1. منطق الإشعارات اللحظية (استشارات) ---
+  useEffect(() => {
+    const setupRealtime = async () => {
+      // الحصول على ID المستخدم الحالي
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const channel = supabase
+        .channel('patient-home-notifications')
+        .on(
+          'postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'consultations',
+            filter: `patient_id=eq.${user.id}`, // نستمع فقط لما يخص هذا المريض
+          },
+          (payload: any) => {
+            // إذا تحولت الحالة إلى completed (تم الرد)
+            if (payload.new.status === 'completed' && payload.old.status !== 'completed') {
+              
+              // 1. تشغيل صوت
+              playAudio('/audio/ding.mp3');
+
+              // 2. إظهار إشعار منبثق
+              toast.success('تم الرد على استشارتك الطبية!', {
+                description: 'اضغط هنا لعرض الرد والروشتة',
+                duration: 8000,
+                action: {
+                  label: 'عرض الرد',
+                  onClick: () => router.push(`/patient/consultations/${payload.new.id}`)
+                }
+              });
+            }
+          }
+        )
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
+    };
+
+    setupRealtime();
+  }, [router]);
+
+
+  // --- 2. منطق تتبع الدور (عيادات) ---
 
   // دالة بدء التتبع (مهمة لتفعيل الصوت في المتصفح)
   const handleStartTracking = () => {
     if (!selectedClinicId || !myTicketNumber) return;
     setIsTracking(true);
     
-    // خدعة لتفعيل الصوت: تشغيل ملف صامت أو قصير جداً عند ضغط الزر
-    // هذا يسمح للمتصفح بتشغيل الأصوات لاحقاً بدون تدخل المستخدم
-    playAudio('/audio/ding.mp3').then(() => {
-        // Stop immediately just to unlock audio context
-    }).catch(() => {});
+    // تفعيل الصوت
+    playAudio('/audio/ding.mp3').catch(() => {});
   };
 
   const handleStopTracking = () => {
@@ -38,7 +89,7 @@ export default function PatientPage() {
     lastAnnouncedNumberRef.current = -1;
   };
 
-  // مراقبة الوضع الحالي
+  // مراقبة الوضع الحالي للعيادة
   useEffect(() => {
     if (!isTracking || !selectedClinicId) return;
 
@@ -51,22 +102,17 @@ export default function PatientPage() {
 
     // منطق التنبيهات
     if (currentNum >= myNum) {
-      // حان الدور (أو فات)
       if (lastAnnouncedNumberRef.current !== currentNum) {
         setNotification({ type: 'success', message: 'حان دورك الآن! يرجى الدخول للعيادة' });
-        // تشغيل صوت وتنبيه
         playAudio('/audio/ding.mp3');
-        // يمكن إضافة نطق هنا إذا توفرت المكتبة، حالياً نكتفي بالـ ding القوي
         lastAnnouncedNumberRef.current = currentNum;
       }
     } else if (diff <= 3 && diff > 0) {
-      // اقترب الدور
       if (notification?.type !== 'warning') {
         setNotification({ type: 'warning', message: `استعد! يتبقى ${toArabicNumbers(diff)} عملاء فقط أمامك` });
-        playAudio('/audio/ding.mp3'); // تنبيه خفيف
+        playAudio('/audio/ding.mp3');
       }
     } else {
-      // لا يزال الانتظار
       setNotification({ type: 'info', message: 'يرجى الانتظار في الاستراحة' });
     }
 
@@ -78,8 +124,11 @@ export default function PatientPage() {
   const turnsRemaining = selectedClinicData ? parseInt(myTicketNumber) - selectedClinicData.current_number : 0;
 
   return (
-    <div className="min-h-screen bg-slate-50 font-cairo text-slate-800 pb-20">
+    <div className="min-h-screen bg-slate-50 font-cairo text-slate-800 pb-20 relative">
       
+      {/* مكون الإشعارات المنبثقة */}
+      <Toaster position="top-center" richColors />
+
       {/* Header */}
       <header className="bg-blue-600 text-white p-6 shadow-lg rounded-b-3xl">
         <div className="flex justify-between items-center mb-4">
@@ -87,8 +136,14 @@ export default function PatientPage() {
             <h1 className="text-2xl font-bold">{settings?.center_name || 'المركز الطبي'}</h1>
             <p className="text-blue-100 text-sm opacity-90">{getArabicDate(new Date())}</p>
           </div>
-          <div className="bg-white/20 p-2 rounded-full backdrop-blur-sm">
-            <User className="w-6 h-6 text-white" />
+          <div className="flex gap-2">
+             {/* زر الذهاب للاستشارات */}
+             <button onClick={() => router.push('/patient/consultations')} className="bg-white/20 p-2 rounded-full backdrop-blur-sm hover:bg-white/30 transition">
+                <FileText className="w-6 h-6 text-white" />
+             </button>
+             <div className="bg-white/20 p-2 rounded-full backdrop-blur-sm">
+               <User className="w-6 h-6 text-white" />
+             </div>
           </div>
         </div>
         {!isTracking && (
@@ -204,8 +259,18 @@ export default function PatientPage() {
             <div className="bg-blue-50 p-4 rounded-xl flex items-start gap-3">
                <Volume2 className="w-5 h-5 text-blue-600 shrink-0 mt-1" />
                <p className="text-xs text-blue-800 leading-relaxed">
-                 عند تفعيل المتابعة، سيقوم هاتفك بإصدار تنبيه صوتي عندما يقترب دورك. يرجى إبقاء هذه الصفحة مفتوحة.
+                 عند تفعيل المتابعة، سيقوم هاتفك بإصدار تنبيه صوتي عندما يقترب دورك.
                </p>
+            </div>
+
+            {/* زر سريع لطلب استشارة جديدة */}
+            <div className="border-t pt-4">
+               <button 
+                 onClick={() => router.push('/patient/consultations/register')}
+                 className="w-full bg-purple-50 text-purple-700 py-3 rounded-xl font-bold hover:bg-purple-100 flex items-center justify-center gap-2 border border-purple-100"
+               >
+                 <MessageSquare className="w-5 h-5"/> طلب استشارة طبية عن بعد
+               </button>
             </div>
 
           </div>
