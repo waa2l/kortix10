@@ -1,135 +1,208 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { supabase } from '@/lib/supabase';
-// 1. أضفنا أيقونة FileText هنا
-import { 
-  Users, Calendar, Settings, Activity, 
-  LogOut, UserPlus, FileText, BarChart3,
-  Stethoscope, MessageSquare
-} from 'lucide-react';
+import { Settings, Tv, Building2, Phone, Users, AlertCircle, LogOut, Menu, X } from 'lucide-react';
+import { useSettings, useClinics } from '@/lib/hooks';
 
 export default function AdminDashboard() {
   const router = useRouter();
-  const [loading, setLoading] = useState(true);
-  const [adminName, setAdminName] = useState('');
+  const { settings, loading: settingsLoading } = useSettings();
+  const { clinics, loading: clinicsLoading } = useClinics();
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [isClient, setIsClient] = useState(false);
 
   useEffect(() => {
-    checkSession();
-  }, []);
-
-  const checkSession = async () => {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) {
+    setIsClient(true);
+    // Check if admin is logged in
+    const adminSession = localStorage.getItem('adminSession');
+    if (!adminSession) {
       router.push('/admin/login');
-      return;
     }
-    
-    // جلب بيانات الأدمن
-    const { data: profile } = await supabase
-      .from('users')
-      .select('email')
-      .eq('id', session.user.id)
-      .single();
+  }, [router]);
 
-    if (profile) {
-      setAdminName(profile.email?.split('@')[0] || 'Admin');
-    }
-    setLoading(false);
-  };
-
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
+  const handleLogout = () => {
+    localStorage.removeItem('adminSession');
     router.push('/admin/login');
   };
 
-  if (loading) return <div className="flex h-screen items-center justify-center text-blue-600">جاري التحميل...</div>;
+  if (!isClient || settingsLoading || clinicsLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <div className="spinner mb-4"></div>
+          <p className="text-gray-600">جاري التحميل...</p>
+        </div>
+      </div>
+    );
+  }
 
-  // قائمة المهام
   const menuItems = [
     {
-      title: 'إدارة الأطباء',
-      href: '/admin/doctors',
-      icon: Stethoscope,
-      color: 'bg-blue-600',
-      desc: 'إضافة وتعديل حسابات الأطباء'
+      title: 'الإعدادات العامة',
+      icon: Settings,
+      href: '/admin/settings/general',
+      color: 'from-blue-500 to-blue-600',
+    },
+    {
+      title: 'إدارة الشاشات',
+      icon: Tv,
+      href: '/admin/settings/screens',
+      color: 'from-purple-500 to-purple-600',
     },
     {
       title: 'إدارة العيادات',
-      href: '/admin/clinics',
-      icon: Activity,
-      color: 'bg-green-600',
-      desc: 'التحكم في العيادات والشاشات'
+      icon: Building2,
+      href: '/admin/settings/clinics',
+      color: 'from-green-500 to-green-600',
     },
     {
-      title: 'إدارة المستخدمين',
-      href: '/admin/users',
+      title: 'إعدادات النداء',
+      icon: Phone,
+      href: '/admin/settings/calls',
+      color: 'from-orange-500 to-orange-600',
+    },
+    {
+      title: 'إدارة الأطباء',
       icon: Users,
-      color: 'bg-purple-600',
-      desc: 'إدارة صلاحيات الموظفين'
-    },
-    // 2. هذا هو الزر الجديد الذي سيأخذك للصفحة التي أنشأتها 👇
-    {
-      title: 'أرشيف الاستشارات',
-      href: '/admin/consultations',
-      icon: FileText,
-      color: 'bg-teal-600',
-      desc: 'مراجعة الاستشارات والروشيتات'
+      href: '/admin/settings/doctors',
+      color: 'from-red-500 to-red-600',
     },
     {
-      title: 'التقارير والإحصائيات',
-      href: '/admin/reports', // تأكد من وجود هذه الصفحة أو قم بإنشائها لاحقاً
-      icon: BarChart3,
-      color: 'bg-orange-600',
-      desc: 'تقارير الأداء اليومية والشهرية'
+      title: 'الشكاوى والاقتراحات',
+      icon: AlertCircle,
+      href: '/admin/settings/complaints',
+      color: 'from-indigo-500 to-indigo-600',
     },
-    {
-      title: 'إعدادات النظام',
-      href: '/admin/settings',
-      icon: Settings,
-      color: 'bg-slate-600',
-      desc: 'إعدادات المركز وشريط الأخبار'
-    }
   ];
 
   return (
-    <div className="min-h-screen bg-slate-50 font-cairo p-8" dir="rtl">
-      
-      {/* Header */}
-      <header className="flex justify-between items-center mb-10 bg-white p-6 rounded-2xl shadow-sm">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-800">لوحة تحكم المدير</h1>
-          <p className="text-slate-500">مرحباً بك، {adminName}</p>
+    <div className="flex h-screen bg-gray-100">
+      {/* Sidebar */}
+      <div
+        className={`${
+          sidebarOpen ? 'w-64' : 'w-20'
+        } bg-gradient-to-b from-gray-900 to-gray-800 text-white transition-all duration-300 flex flex-col`}
+      >
+        {/* Logo */}
+        <div className="p-4 border-b border-gray-700 flex items-center justify-between">
+          {sidebarOpen && <h2 className="text-xl font-bold">الإدارة</h2>}
+          <button
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+            className="p-2 hover:bg-gray-700 rounded-lg transition-colors"
+          >
+            {sidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+          </button>
         </div>
-        <button 
-          onClick={handleLogout}
-          className="flex items-center gap-2 text-red-600 hover:bg-red-50 px-4 py-2 rounded-lg transition font-bold"
-        >
-          <LogOut className="w-5 h-5" />
-          تسجيل خروج
-        </button>
-      </header>
 
-      {/* Grid Menu */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {menuItems.map((item, index) => {
-          const Icon = item.icon;
-          return (
-            <Link key={index} href={item.href}>
-              <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:shadow-lg hover:-translate-y-1 transition-all duration-300 group cursor-pointer h-full">
-                <div className={`${item.color} w-14 h-14 rounded-xl flex items-center justify-center text-white mb-4 shadow-md group-hover:scale-110 transition-transform`}>
-                  <Icon className="w-7 h-7" />
+        {/* Menu Items */}
+        <nav className="flex-1 p-4 space-y-2">
+          {menuItems.map((item) => {
+            const Icon = item.icon;
+            return (
+              <Link key={item.href} href={item.href}>
+                <div className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-700 transition-colors cursor-pointer group">
+                  <Icon className="w-5 h-5 flex-shrink-0" />
+                  {sidebarOpen && <span className="text-sm font-medium">{item.title}</span>}
                 </div>
-                <h3 className="text-xl font-bold text-slate-800 mb-2">{item.title}</h3>
-                <p className="text-slate-500 text-sm">{item.desc}</p>
-              </div>
-            </Link>
-          );
-        })}
+              </Link>
+            );
+          })}
+        </nav>
+
+        {/* Logout Button */}
+        <div className="p-4 border-t border-gray-700">
+          <button
+            onClick={handleLogout}
+            className="w-full flex items-center gap-3 p-3 rounded-lg hover:bg-red-600 transition-colors text-red-400 hover:text-white"
+          >
+            <LogOut className="w-5 h-5" />
+            {sidebarOpen && <span className="text-sm font-medium">تسجيل الخروج</span>}
+          </button>
+        </div>
       </div>
 
+      {/* Main Content */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {/* Header */}
+        <header className="bg-white shadow-md p-6 border-b border-gray-200">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-3xl font-bold text-gray-800">لوحة تحكم الإدارة</h1>
+              <p className="text-gray-600 mt-1">{settings?.center_name}</p>
+            </div>
+            <div className="text-right">
+              <p className="text-sm text-gray-600">مرحبا بك في نظام الإدارة</p>
+            </div>
+          </div>
+        </header>
+
+        {/* Content */}
+        <main className="flex-1 overflow-auto p-6">
+          {/* Stats Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+            <div className="bg-white rounded-lg shadow-md p-6 border-r-4 border-blue-500">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-gray-600 text-sm">عدد العيادات</p>
+                  <p className="text-3xl font-bold text-gray-800">{clinics.length}</p>
+                </div>
+                <Building2 className="w-12 h-12 text-blue-500 opacity-20" />
+              </div>
+            </div>
+
+            <div className="bg-white rounded-lg shadow-md p-6 border-r-4 border-purple-500">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-gray-600 text-sm">الشاشات النشطة</p>
+                  <p className="text-3xl font-bold text-gray-800">5</p>
+                </div>
+                <Tv className="w-12 h-12 text-purple-500 opacity-20" />
+              </div>
+            </div>
+
+            <div className="bg-white rounded-lg shadow-md p-6 border-r-4 border-green-500">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-gray-600 text-sm">الأطباء</p>
+                  <p className="text-3xl font-bold text-gray-800">10</p>
+                </div>
+                <Users className="w-12 h-12 text-green-500 opacity-20" />
+              </div>
+            </div>
+
+            <div className="bg-white rounded-lg shadow-md p-6 border-r-4 border-orange-500">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-gray-600 text-sm">المركز</p>
+                  <p className="text-lg font-bold text-gray-800 truncate">{settings?.center_name}</p>
+                </div>
+                <AlertCircle className="w-12 h-12 text-orange-500 opacity-20" />
+              </div>
+            </div>
+          </div>
+
+          {/* Menu Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {menuItems.map((item) => {
+              const Icon = item.icon;
+              return (
+                <Link key={item.href} href={item.href}>
+                  <div className="bg-white rounded-lg shadow-md hover:shadow-lg transition-all duration-300 transform hover:-translate-y-1 overflow-hidden cursor-pointer group">
+                    <div className={`bg-gradient-to-r ${item.color} h-24 flex items-center justify-center group-hover:scale-110 transition-transform duration-300`}>
+                      <Icon className="w-12 h-12 text-white" />
+                    </div>
+                    <div className="p-6">
+                      <h3 className="text-lg font-bold text-gray-800">{item.title}</h3>
+                    </div>
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
+        </main>
+      </div>
     </div>
   );
 }
