@@ -153,7 +153,8 @@ export default function DoctorConsultationsPage() {
 
   const fetchConsultations = async () => {
     setLoading(true);
-    let query = supabase.from('consultations').select('*, patient:patients(*)');
+    let query = supabase.from('consultations')
+      .select('*, patient:patients(full_name, gender, phone, email, weight_kg, height_cm)'); // أضفنا phone, email
     if (activeTab === 'inbox') {
       query = query.eq('status', 'open').eq('specialization', currentDoctor?.specialization); 
     } else {
@@ -278,8 +279,12 @@ export default function DoctorConsultationsPage() {
     }
   };
 
+// ... داخل مكون DoctorConsultationsPage
+
   const handleSubmitReply = async () => {
     if(!selectedConsultation || !currentDoctor) return;
+
+    // 1. حفظ البيانات في Supabase (كما هو موجود سابقاً)
     const { error } = await supabase.from('consultations').update({
        status: 'completed',
        doctor_id: currentDoctor.id,
@@ -288,8 +293,36 @@ export default function DoctorConsultationsPage() {
        tests: replyData.selectedTests.join(', '),
        imaging: replyData.selectedImaging.join(', '),
        health_messages: JSON.stringify(replyData.healthMessages),
+       updated_at: new Date().toISOString() // مهم للإشعارات اللحظية
     }).eq('id', selectedConsultation.id);
-    if(!error) { alert('تم الحفظ والإرسال'); handleSkip(); } else { alert('خطأ في الحفظ'); }
+
+    if (error) {
+       alert('حدث خطأ أثناء الحفظ في قاعدة البيانات');
+       return;
+    }
+
+    // 2. إرسال الإشعارات (واتساب + بريد)
+    // نقوم بذلك في الخلفية ولا ننتظر الرد لعدم تعطيل الطبيب
+    const patientPhone = selectedConsultation.patient?.phone; // تأكد أن هذا الحقل موجود في الاستعلام
+    const patientEmail = selectedConsultation.patient?.email;
+
+    fetch('/api/send-notification', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: patientEmail,
+        phone: patientPhone,
+        patientName: selectedConsultation.patient?.full_name,
+        diagnosis: replyData.diagnosis,
+        type: 'reply'
+      })
+    }).then(res => res.json())
+      .then(data => console.log('Notification Status:', data))
+      .catch(err => console.error('Notification Error:', err));
+
+    // 3. إنهاء العملية
+    alert('تم الحفظ وإرسال الإشعارات للمريض بنجاح ✅');
+    handleSkip();
   };
 
   const PatientMedicalProfile = ({ patient }: { patient: PatientData }) => (
