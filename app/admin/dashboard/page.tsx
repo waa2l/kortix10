@@ -75,6 +75,12 @@ export default function AdminDashboard() {
       href: '/admin/settings/complaints',
       color: 'from-indigo-500 to-indigo-600',
     },
+    {
+      title: 'الاستشارات',
+      icon: AlertCircle,
+      href: '/admin/settings/consultations',
+      color: 'from-indigo-500 to-indigo-600',
+    },
   ];
 
   return (
