@@ -23,7 +23,10 @@
     "axios": "^1.6.0",
     "zustand": "^4.4.0",
     "date-fns": "^2.30.0",
-    "react-hot-toast": "^2.4.1"
+    "react-hot-toast": "^2.4.1",
+    "sonner": "^1.4.0",
+    "resend": "^3.1.0",
+    "twilio": "^4.22.0"
   },
   "devDependencies": {
     "typescript": "^5.2.0",
