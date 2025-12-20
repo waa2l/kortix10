@@ -5,14 +5,16 @@ import { supabase } from '@/lib/supabase';
 import { 
   Stethoscope, Clock, AlertTriangle, User, ArrowRight, ArrowLeft, 
   Send, X, Share2, MessageSquare, Plus, Trash2, CheckCircle, Printer,
-  Activity, FileText, AlertOctagon, Baby, History, Inbox, Bot, Calculator, LayoutTemplate
+  Activity, FileText, AlertOctagon, Baby, History, Inbox, Bot, Calculator
 } from 'lucide-react';
 import { PrescriptionView } from '@/components/PrescriptionView'; 
 
-// --- Types ---
+// --- Types (تم تحديث هذا الجزء) ---
 type PatientData = {
   full_name: string;
   gender: string;
+  phone?: string; // <-- تمت الإضافة
+  email?: string; // <-- تمت الإضافة
   age?: number;
   weight_kg?: number;
   height_cm?: number;
@@ -43,7 +45,7 @@ type Consultation = {
   patient?: PatientData;
 };
 
-// --- Templates (قوالب الردود الجاهزة) ---
+// --- Templates ---
 const TEMPLATES = {
   'cold': {
     name: 'نزلات البرد / الإنفلونزا',
@@ -153,8 +155,8 @@ export default function DoctorConsultationsPage() {
 
   const fetchConsultations = async () => {
     setLoading(true);
-    let query = supabase.from('consultations')
-      .select('*, patient:patients(full_name, gender, phone, email, weight_kg, height_cm)'); // أضفنا phone, email
+    // select all from patients table to verify phone/email exists
+    let query = supabase.from('consultations').select('*, patient:patients(*)');
     if (activeTab === 'inbox') {
       query = query.eq('status', 'open').eq('specialization', currentDoctor?.specialization); 
     } else {
@@ -198,14 +200,11 @@ export default function DoctorConsultationsPage() {
 
   const startReply = () => { setStep(1); setReplyData({ diagnosis: '', selectedTests: [], selectedImaging: [], prescriptions: [], healthMessages: [], followUpDate: '', notes: '' }); setViewMode('reply'); };
 
-  // --- 1. Drug Interaction Check (فحص التعارضات) ---
+  // --- Drug Interaction Check ---
   const checkDrugInteraction = (medicineName: string) => {
     if (!selectedConsultation?.patient?.allergy_details) return null;
     const allergies = selectedConsultation.patient.allergy_details.toLowerCase();
     const med = medicineName.toLowerCase();
-    
-    // فحص بسيط: هل اسم الدواء موجود في نص الحساسية؟
-    // يمكن تطويره لاحقاً ليشمل المادة الفعالة
     if (allergies.includes(med) || (med.includes('augmentin') && allergies.includes('penicillin'))) {
       return `⚠️ تحذير: المريض لديه حساسية مسجلة قد تتعارض مع ${medicineName}`;
     }
@@ -214,25 +213,20 @@ export default function DoctorConsultationsPage() {
 
   const addMedicine = () => {
     if(!tempMed.name) return alert('اختر اسم الدواء');
-    
-    // فحص الحساسية
     const warning = checkDrugInteraction(tempMed.name);
-    if (warning) {
-      if (!confirm(`${warning}\n\nهل تريد إضافة الدواء على مسؤوليتك؟`)) return;
-    }
-
+    if (warning) { if (!confirm(`${warning}\n\nهل تريد إضافة الدواء على مسؤوليتك؟`)) return; }
     setReplyData({ ...replyData, prescriptions: [...replyData.prescriptions, tempMed] });
     setTempMed({ name: '', form: '', concentration: '', frequency: '', duration: '', relation: '', timing: '', notes: '' });
   };
   const removeMedicine = (index: number) => { const newMeds = [...replyData.prescriptions]; newMeds.splice(index, 1); setReplyData({ ...replyData, prescriptions: newMeds }); };
 
-  // --- 2. Dosage Calculator (مساعد الجرعات) ---
+  // --- Dosage Calculator ---
   const calculateDose = () => {
     const weight = selectedConsultation?.patient?.weight_kg || 0;
     const perKg = parseFloat(dosePerKg);
     if (weight > 0 && perKg > 0) {
       const total = weight * perKg;
-      setTempMed({ ...tempMed, concentration: `${total}mg` }); // اقتراح الجرعة في خانة التركيز
+      setTempMed({ ...tempMed, concentration: `${total}mg` });
       alert(`وزن المريض: ${weight} كجم\nالجرعة المطلوبة: ${total} مجم`);
       setShowDosageCalc(false);
     } else {
@@ -240,30 +234,25 @@ export default function DoctorConsultationsPage() {
     }
   };
 
-  // --- 3. AI Assistant (المساعد الذكي) ---
+  // --- AI Assistant ---
   const runAIAssistant = () => {
     setAiLoading(true);
-    // محاكاة للذكاء الاصطناعي (Simulation)
     setTimeout(() => {
       const complaint = selectedConsultation?.complaint_text || '';
       let suggestion = { diagnosis: '', advice: '' };
-
       if (complaint.includes('حرارة') || complaint.includes('سخونية')) suggestion = { diagnosis: 'Febril Convulsion / Viral Infection', advice: 'خافض حرارة + كمادات' };
       else if (complaint.includes('مغص') || complaint.includes('اسهال')) suggestion = { diagnosis: 'Gastroenteritis', advice: 'مطهر معوي + سوائل' };
       else suggestion = { diagnosis: 'General Checkup Required', advice: 'يحتاج فحص سريري' };
-
       setReplyData(prev => ({
         ...prev,
         diagnosis: suggestion.diagnosis,
         notes: prev.notes + (prev.notes ? '\n' : '') + `[AI Suggestion]: ${suggestion.advice}`
       }));
-      
       setAiLoading(false);
       alert('تم تحليل الشكوى واقتراح التشخيص في الحقول.');
     }, 1500);
   };
 
-  // --- 4. Apply Template (القوالب الجاهزة) ---
   const applyTemplate = (templateKey: string) => {
     const template = TEMPLATES[templateKey as keyof typeof TEMPLATES];
     if (template) {
@@ -279,12 +268,11 @@ export default function DoctorConsultationsPage() {
     }
   };
 
-// ... داخل مكون DoctorConsultationsPage
-
+  // --- Submit Reply & Notifications ---
   const handleSubmitReply = async () => {
     if(!selectedConsultation || !currentDoctor) return;
 
-    // 1. حفظ البيانات في Supabase (كما هو موجود سابقاً)
+    // 1. Save to DB
     const { error } = await supabase.from('consultations').update({
        status: 'completed',
        doctor_id: currentDoctor.id,
@@ -293,18 +281,14 @@ export default function DoctorConsultationsPage() {
        tests: replyData.selectedTests.join(', '),
        imaging: replyData.selectedImaging.join(', '),
        health_messages: JSON.stringify(replyData.healthMessages),
-       updated_at: new Date().toISOString() // مهم للإشعارات اللحظية
+       updated_at: new Date().toISOString()
     }).eq('id', selectedConsultation.id);
 
-    if (error) {
-       alert('حدث خطأ أثناء الحفظ في قاعدة البيانات');
-       return;
-    }
+    if (error) { alert('خطأ في الحفظ'); return; }
 
-    // 2. إرسال الإشعارات (واتساب + بريد)
-    // نقوم بذلك في الخلفية ولا ننتظر الرد لعدم تعطيل الطبيب
-    const patientPhone = selectedConsultation.patient?.phone; // تأكد أن هذا الحقل موجود في الاستعلام
-    const patientEmail = selectedConsultation.patient?.email;
+    // 2. Send Notifications (Email & WhatsApp)
+    const patientPhone = selectedConsultation.patient?.phone; // Now Valid
+    const patientEmail = selectedConsultation.patient?.email; // Now Valid
 
     fetch('/api/send-notification', {
       method: 'POST',
@@ -316,15 +300,16 @@ export default function DoctorConsultationsPage() {
         diagnosis: replyData.diagnosis,
         type: 'reply'
       })
-    }).then(res => res.json())
-      .then(data => console.log('Notification Status:', data))
-      .catch(err => console.error('Notification Error:', err));
+    })
+    .then(res => res.json())
+    .then(data => console.log('Notification:', data))
+    .catch(err => console.error('Notification Error:', err));
 
-    // 3. إنهاء العملية
-    alert('تم الحفظ وإرسال الإشعارات للمريض بنجاح ✅');
+    alert('تم الحفظ وإرسال الإشعارات بنجاح ✅');
     handleSkip();
   };
 
+  // --- Components ---
   const PatientMedicalProfile = ({ patient }: { patient: PatientData }) => (
     <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 mb-6">
        <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2"><Activity className="w-5 h-5 text-blue-600"/> الملف الطبي للمريض</h3>
@@ -359,6 +344,7 @@ export default function DoctorConsultationsPage() {
         </div>
       </header>
 
+      {/* VIEW 1: LIST */}
       {viewMode === 'list' && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {consultations.length === 0 ? <div className="col-span-full text-center py-20 text-slate-400 font-bold">{activeTab === 'inbox' ? 'لا توجد استشارات جديدة في تخصصك' : 'لم تقم بالرد على أي استشارة بعد'}</div> : 
@@ -380,6 +366,7 @@ export default function DoctorConsultationsPage() {
         </div>
       )}
 
+      {/* VIEW 2: DETAILS */}
       {viewMode === 'details' && selectedConsultation && (
         <div className="max-w-4xl mx-auto bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden relative">
            <div className="bg-blue-600 p-6 text-white flex justify-between items-center">
@@ -422,6 +409,7 @@ export default function DoctorConsultationsPage() {
         </div>
       )}
 
+      {/* VIEW 3: REPLY WIZARD */}
       {viewMode === 'reply' && (
         <div className="max-w-4xl mx-auto bg-white rounded-2xl shadow-xl border border-slate-200">
           <div className="bg-slate-900 text-white p-4 rounded-t-2xl flex justify-between items-center">
