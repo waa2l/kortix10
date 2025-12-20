@@ -8,11 +8,13 @@ export async function GET(request: Request) {
 
   if (code) {
     const cookieStore = cookies();
+    // إنشاء العميل الذي يتعامل مع الكوكيز تلقائياً
     const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
-    // تبديل الكود بـ Session فعلية
+    
+    // تبديل الكود بجلسة مستخدم وتخزينها في الكوكيز
     await supabase.auth.exchangeCodeForSession(code);
   }
 
-  // التوجيه النهائي لصفحة المريض
+  // التوجيه لصفحة المريض بعد النجاح
   return NextResponse.redirect(new URL('/patient', request.url));
 }
