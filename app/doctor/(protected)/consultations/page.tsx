@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase';
 import { 
   Stethoscope, Clock, AlertTriangle, User, ArrowRight, ArrowLeft, 
   Send, X, Share2, MessageSquare, Plus, Trash2, CheckCircle, Printer,
-  Activity, FileText, AlertOctagon, Baby, History, Inbox
+  Activity, FileText, AlertOctagon, Baby, History, Inbox, Bot, Calculator, LayoutTemplate
 } from 'lucide-react';
 import { PrescriptionView } from '@/components/PrescriptionView'; 
 
@@ -43,6 +43,45 @@ type Consultation = {
   patient?: PatientData;
 };
 
+// --- Templates (قوالب الردود الجاهزة) ---
+const TEMPLATES = {
+  'cold': {
+    name: 'نزلات البرد / الإنفلونزا',
+    diagnosis: 'Acute Viral Nasopharyngitis (Common Cold)',
+    tests: [],
+    imaging: [],
+    medicines: [
+      { name: 'Paracetamol', form: 'أقراص', concentration: '500mg', frequency: 'عند اللزوم', duration: '5 أيام', relation: 'بعد الأكل', notes: 'خافض حرارة ومسكن' },
+      { name: 'Vitamin C', form: 'فوار', concentration: '1000mg', frequency: 'مرة يومياً', duration: '7 أيام', relation: 'بعد الأكل', notes: 'لرفع المناعة' }
+    ],
+    healthMessages: ['الراحة التامة في المنزل', 'شرب سوائل دافئة بكثرة', 'تجنب التيارات الهوائية الباردة'],
+    notes: 'مراجعة المستشفى في حالة استمرار الحرارة أكثر من 3 أيام.'
+  },
+  'gastro': {
+    name: 'النزلة المعوية',
+    diagnosis: 'Acute Gastroenteritis',
+    tests: ['Stool Analysis'],
+    imaging: [],
+    medicines: [
+      { name: 'Antinal', form: 'كبسول', concentration: '200mg', frequency: '3 مرات يومياً', duration: '5 أيام', relation: 'قبل الأكل', notes: 'مطهر معوي' },
+      { name: 'Visceralgine', form: 'أقراص', concentration: '50mg', frequency: 'عند اللزوم', duration: '3 أيام', relation: 'قبل الأكل', notes: 'للمغص' }
+    ],
+    healthMessages: ['تجنب الألبان والدهون', 'تناول أطعمة مسلوقة (بطاطس، أرز)', 'شرب سوائل لتعويض الفاقد'],
+    notes: ''
+  },
+  'anemia': {
+    name: 'فقر الدم (أنيميا)',
+    diagnosis: 'Iron Deficiency Anemia',
+    tests: ['CBC', 'Serum Ferritin'],
+    imaging: [],
+    medicines: [
+      { name: 'Ferrotron', form: 'كبسول', concentration: '', frequency: 'مرة يومياً', duration: '3 شهور', relation: 'بعد الغداء', notes: 'مكمل حديد' }
+    ],
+    healthMessages: ['الإكثار من العسل الأسود والسبانخ والباذنجان', 'تناول فيتامين C مع الأكل لزيادة الامتصاص'],
+    notes: 'إعادة تحليل الهيموجلوبين بعد شهر.'
+  }
+};
+
 const getTimeElapsed = (dateString: string) => {
   const diff = new Date().getTime() - new Date(dateString).getTime();
   const hours = Math.floor(diff / (1000 * 60 * 60));
@@ -54,7 +93,6 @@ const getTimeElapsed = (dateString: string) => {
 
 export default function DoctorConsultationsPage() {
   const [currentDoctor, setCurrentDoctor] = useState<{id: string, full_name: string, specialization: string} | null>(null);
-  
   const [consultations, setConsultations] = useState<Consultation[]>([]);
   const [selectedConsultation, setSelectedConsultation] = useState<Consultation | null>(null);
   const [loading, setLoading] = useState(true);
@@ -62,6 +100,7 @@ export default function DoctorConsultationsPage() {
   const [activeTab, setActiveTab] = useState<'inbox' | 'history'>('inbox');
   const [viewMode, setViewMode] = useState<'list' | 'details' | 'reply'>('list');
 
+  // Lists
   const [diagnosesList, setDiagnosesList] = useState<any[]>([]);
   const [testsList, setTestsList] = useState<any[]>([]);
   const [imagingList, setImagingList] = useState<any[]>([]);
@@ -70,7 +109,7 @@ export default function DoctorConsultationsPage() {
   const [availableSpecializations, setAvailableSpecializations] = useState<string[]>([]);
   const [showTransferModal, setShowTransferModal] = useState(false);
 
-  // --- Reply Form State ---
+  // Reply Form
   const [step, setStep] = useState(1);
   const [replyData, setReplyData] = useState({
     diagnosis: '',
@@ -85,6 +124,11 @@ export default function DoctorConsultationsPage() {
   const [tempMed, setTempMed] = useState({
     name: '', form: '', concentration: '', frequency: '', duration: '', relation: '', timing: '', notes: ''
   });
+
+  // AI & Tools State
+  const [aiLoading, setAiLoading] = useState(false);
+  const [showDosageCalc, setShowDosageCalc] = useState(false);
+  const [dosePerKg, setDosePerKg] = useState('');
 
   const printRef = useRef<HTMLDivElement>(null);
   const handlePrint = () => { if (printRef.current) { const original = document.body.innerHTML; document.body.innerHTML = printRef.current.outerHTML; window.print(); window.location.reload(); } };
@@ -110,13 +154,11 @@ export default function DoctorConsultationsPage() {
   const fetchConsultations = async () => {
     setLoading(true);
     let query = supabase.from('consultations').select('*, patient:patients(*)');
-
     if (activeTab === 'inbox') {
       query = query.eq('status', 'open').eq('specialization', currentDoctor?.specialization); 
     } else {
       query = query.eq('status', 'completed').eq('doctor_id', currentDoctor?.id);
     }
-
     const { data } = await query.order('created_at', { ascending: false });
     if (data) setConsultations(data);
     setLoading(false);
@@ -130,11 +172,8 @@ export default function DoctorConsultationsPage() {
       supabase.from('medicines').select('medicine_name'),
       supabase.from('health_messages').select('message_text'),
     ]);
-    if(d.data) setDiagnosesList(d.data);
-    if(t.data) setTestsList(t.data);
-    if(i.data) setImagingList(i.data);
-    if(m.data) setMedicinesList(m.data);
-    if(h.data) setMessagesList(h.data);
+    if(d.data) setDiagnosesList(d.data); if(t.data) setTestsList(t.data); if(i.data) setImagingList(i.data);
+    if(m.data) setMedicinesList(m.data); if(h.data) setMessagesList(h.data);
   };
 
   const fetchSettings = async () => {
@@ -158,12 +197,86 @@ export default function DoctorConsultationsPage() {
 
   const startReply = () => { setStep(1); setReplyData({ diagnosis: '', selectedTests: [], selectedImaging: [], prescriptions: [], healthMessages: [], followUpDate: '', notes: '' }); setViewMode('reply'); };
 
+  // --- 1. Drug Interaction Check (فحص التعارضات) ---
+  const checkDrugInteraction = (medicineName: string) => {
+    if (!selectedConsultation?.patient?.allergy_details) return null;
+    const allergies = selectedConsultation.patient.allergy_details.toLowerCase();
+    const med = medicineName.toLowerCase();
+    
+    // فحص بسيط: هل اسم الدواء موجود في نص الحساسية؟
+    // يمكن تطويره لاحقاً ليشمل المادة الفعالة
+    if (allergies.includes(med) || (med.includes('augmentin') && allergies.includes('penicillin'))) {
+      return `⚠️ تحذير: المريض لديه حساسية مسجلة قد تتعارض مع ${medicineName}`;
+    }
+    return null;
+  };
+
   const addMedicine = () => {
     if(!tempMed.name) return alert('اختر اسم الدواء');
+    
+    // فحص الحساسية
+    const warning = checkDrugInteraction(tempMed.name);
+    if (warning) {
+      if (!confirm(`${warning}\n\nهل تريد إضافة الدواء على مسؤوليتك؟`)) return;
+    }
+
     setReplyData({ ...replyData, prescriptions: [...replyData.prescriptions, tempMed] });
     setTempMed({ name: '', form: '', concentration: '', frequency: '', duration: '', relation: '', timing: '', notes: '' });
   };
   const removeMedicine = (index: number) => { const newMeds = [...replyData.prescriptions]; newMeds.splice(index, 1); setReplyData({ ...replyData, prescriptions: newMeds }); };
+
+  // --- 2. Dosage Calculator (مساعد الجرعات) ---
+  const calculateDose = () => {
+    const weight = selectedConsultation?.patient?.weight_kg || 0;
+    const perKg = parseFloat(dosePerKg);
+    if (weight > 0 && perKg > 0) {
+      const total = weight * perKg;
+      setTempMed({ ...tempMed, concentration: `${total}mg` }); // اقتراح الجرعة في خانة التركيز
+      alert(`وزن المريض: ${weight} كجم\nالجرعة المطلوبة: ${total} مجم`);
+      setShowDosageCalc(false);
+    } else {
+      alert('تأكد من وجود وزن مسجل للمريض وإدخال الجرعة لكل كجم');
+    }
+  };
+
+  // --- 3. AI Assistant (المساعد الذكي) ---
+  const runAIAssistant = () => {
+    setAiLoading(true);
+    // محاكاة للذكاء الاصطناعي (Simulation)
+    setTimeout(() => {
+      const complaint = selectedConsultation?.complaint_text || '';
+      let suggestion = { diagnosis: '', advice: '' };
+
+      if (complaint.includes('حرارة') || complaint.includes('سخونية')) suggestion = { diagnosis: 'Febril Convulsion / Viral Infection', advice: 'خافض حرارة + كمادات' };
+      else if (complaint.includes('مغص') || complaint.includes('اسهال')) suggestion = { diagnosis: 'Gastroenteritis', advice: 'مطهر معوي + سوائل' };
+      else suggestion = { diagnosis: 'General Checkup Required', advice: 'يحتاج فحص سريري' };
+
+      setReplyData(prev => ({
+        ...prev,
+        diagnosis: suggestion.diagnosis,
+        notes: prev.notes + (prev.notes ? '\n' : '') + `[AI Suggestion]: ${suggestion.advice}`
+      }));
+      
+      setAiLoading(false);
+      alert('تم تحليل الشكوى واقتراح التشخيص في الحقول.');
+    }, 1500);
+  };
+
+  // --- 4. Apply Template (القوالب الجاهزة) ---
+  const applyTemplate = (templateKey: string) => {
+    const template = TEMPLATES[templateKey as keyof typeof TEMPLATES];
+    if (template) {
+      setReplyData({
+        ...replyData,
+        diagnosis: template.diagnosis,
+        selectedTests: template.tests,
+        selectedImaging: template.imaging,
+        prescriptions: template.medicines,
+        healthMessages: template.healthMessages,
+        notes: template.notes
+      });
+    }
+  };
 
   const handleSubmitReply = async () => {
     if(!selectedConsultation || !currentDoctor) return;
@@ -192,11 +305,6 @@ export default function DoctorConsultationsPage() {
           {patient.chronic_diseases && <div className="flex gap-2 items-start"><AlertOctagon className="w-4 h-4 text-red-500 mt-1"/><p className="text-sm"><strong>أمراض مزمنة:</strong> {patient.chronic_diseases}</p></div>}
           {patient.current_medications && <div className="flex gap-2 items-start"><FileText className="w-4 h-4 text-blue-500 mt-1"/><p className="text-sm"><strong>أدوية حالية:</strong> {patient.medication_details}</p></div>}
           {patient.drug_allergies && <div className="flex gap-2 items-start bg-red-50 p-2 rounded border border-red-100"><AlertTriangle className="w-4 h-4 text-red-600 mt-1"/><p className="text-sm text-red-800"><strong>حساسية أدوية:</strong> {patient.allergy_details}</p></div>}
-          {patient.previous_surgeries && <div className="flex gap-2 items-start"><Activity className="w-4 h-4 text-slate-500 mt-1"/><p className="text-sm"><strong>عمليات سابقة:</strong> {patient.surgery_details}</p></div>}
-          {patient.gender === 'female' && <div className="flex gap-4 mt-2">
-             {patient.is_pregnant && <span className="text-xs bg-pink-100 text-pink-700 px-2 py-1 rounded font-bold flex items-center gap-1"><Baby className="w-3 h-3"/> حامل</span>}
-             {patient.is_breastfeeding && <span className="text-xs bg-pink-100 text-pink-700 px-2 py-1 rounded font-bold">مرضع</span>}
-          </div>}
        </div>
     </div>
   );
@@ -218,7 +326,6 @@ export default function DoctorConsultationsPage() {
         </div>
       </header>
 
-      {/* VIEW 1: LIST */}
       {viewMode === 'list' && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {consultations.length === 0 ? <div className="col-span-full text-center py-20 text-slate-400 font-bold">{activeTab === 'inbox' ? 'لا توجد استشارات جديدة في تخصصك' : 'لم تقم بالرد على أي استشارة بعد'}</div> : 
@@ -240,7 +347,6 @@ export default function DoctorConsultationsPage() {
         </div>
       )}
 
-      {/* VIEW 2: DETAILS */}
       {viewMode === 'details' && selectedConsultation && (
         <div className="max-w-4xl mx-auto bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden relative">
            <div className="bg-blue-600 p-6 text-white flex justify-between items-center">
@@ -283,26 +389,38 @@ export default function DoctorConsultationsPage() {
         </div>
       )}
 
-      {/* VIEW 3: REPLY WIZARD */}
       {viewMode === 'reply' && (
         <div className="max-w-4xl mx-auto bg-white rounded-2xl shadow-xl border border-slate-200">
           <div className="bg-slate-900 text-white p-4 rounded-t-2xl flex justify-between items-center">
-             <h2 className="font-bold">الرد الطبي - خطوة {step} من 7</h2>
+             <h2 className="font-bold flex items-center gap-2">
+               الرد الطبي - خطوة {step} من 7
+               {step === 1 && (
+                 <select onChange={(e) => applyTemplate(e.target.value)} className="bg-slate-700 border-none text-xs text-white p-1 rounded mx-2">
+                   <option value="">-- قوالب جاهزة --</option>
+                   <option value="cold">نزلات البرد</option>
+                   <option value="gastro">نزلة معوية</option>
+                   <option value="anemia">فقر دم</option>
+                 </select>
+               )}
+             </h2>
              <button onClick={() => setViewMode('details')} className="text-slate-400 hover:text-white">إلغاء</button>
           </div>
           <div className="w-full bg-slate-200 h-2"><div className="bg-green-500 h-2 transition-all duration-300" style={{ width: `${(step/7)*100}%` }}></div></div>
           
           <div className="p-8 min-h-[400px]">
-            {/* Step 1: Diagnosis */}
             {step === 1 && (
                <div className="space-y-4 animate-in fade-in">
-                  <h3 className="text-xl font-bold text-slate-800 mb-4">1. التشخيص المبدئي</h3>
+                  <div className="flex justify-between items-center mb-4">
+                    <h3 className="text-xl font-bold text-slate-800">1. التشخيص المبدئي</h3>
+                    <button onClick={runAIAssistant} disabled={aiLoading} className="bg-purple-600 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 hover:bg-purple-700 disabled:opacity-50">
+                      {aiLoading ? 'جاري التحليل...' : <><Bot className="w-4 h-4"/> تحليل AI</>}
+                    </button>
+                  </div>
                   <input list="d" className="w-full p-3 border rounded-xl" placeholder="ابحث عن تشخيص..." value={replyData.diagnosis} onChange={e=>setReplyData({...replyData, diagnosis:e.target.value})}/>
                   <datalist id="d">{diagnosesList.map((d,i)=><option key={i} value={d.diagnosis_name}/>)}</datalist>
                </div>
             )}
 
-            {/* Step 2: Tests */}
             {step === 2 && (
                <div className="space-y-4 animate-in fade-in">
                   <h3 className="text-xl font-bold text-slate-800 mb-4">2. التحاليل المطلوبة</h3>
@@ -314,7 +432,6 @@ export default function DoctorConsultationsPage() {
                </div>
             )}
 
-            {/* Step 3: Imaging */}
             {step === 3 && (
                <div className="space-y-4 animate-in fade-in">
                   <h3 className="text-xl font-bold text-slate-800 mb-4">3. الأشعات المطلوبة</h3>
@@ -326,18 +443,27 @@ export default function DoctorConsultationsPage() {
                </div>
             )}
 
-            {/* Step 4: Medicines (FULL FORM) */}
             {step === 4 && (
                <div className="space-y-4 animate-in fade-in">
                   <h3 className="text-xl font-bold text-slate-800 mb-4">4. الوصفة الطبية (الأدوية)</h3>
-                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 grid grid-cols-2 md:grid-cols-4 gap-3 relative">
+                     {showDosageCalc && (
+                       <div className="absolute top-12 left-4 bg-white shadow-xl p-4 rounded-xl border border-slate-200 z-10 w-64">
+                         <h4 className="font-bold text-sm mb-2 flex gap-1"><Calculator className="w-4 h-4"/> حاسبة الجرعة</h4>
+                         <div className="text-xs text-slate-500 mb-2">وزن المريض: {selectedConsultation?.patient?.weight_kg || 0} كجم</div>
+                         <input type="number" placeholder="الجرعة (مجم/كجم)" className="w-full p-2 border rounded mb-2 text-sm" value={dosePerKg} onChange={e=>setDosePerKg(e.target.value)}/>
+                         <button onClick={calculateDose} className="w-full bg-blue-600 text-white py-1 rounded text-xs font-bold">احسب</button>
+                         <button onClick={()=>setShowDosageCalc(false)} className="w-full mt-1 text-slate-400 text-xs">إغلاق</button>
+                       </div>
+                     )}
+                     
                      <div className="col-span-2 md:col-span-4">
                         <label className="text-xs font-bold text-slate-500">اسم الدواء</label>
                         <input list="mds" className="w-full p-2 border rounded" value={tempMed.name} onChange={e=>setTempMed({...tempMed, name:e.target.value})} placeholder="ابحث عن دواء..."/>
                         <datalist id="mds">{medicinesList.map((m,i)=><option key={i} value={m.medicine_name}/>)}</datalist>
                      </div>
                      <div><label className="text-xs font-bold text-slate-500">الشكل (Form)</label><select className="w-full p-2 border rounded" value={tempMed.form} onChange={e=>setTempMed({...tempMed, form:e.target.value})}><option value="">اختر</option><option value="أقراص">أقراص</option><option value="شراب">شراب</option><option value="حقن">حقن</option><option value="مرهم">مرهم</option><option value="نقط">نقط</option></select></div>
-                     <div><label className="text-xs font-bold text-slate-500">التركيز</label><input className="w-full p-2 border rounded" value={tempMed.concentration} onChange={e=>setTempMed({...tempMed, concentration:e.target.value})} placeholder="500mg"/></div>
+                     <div className="relative"><label className="text-xs font-bold text-slate-500 flex justify-between">التركيز <button onClick={()=>setShowDosageCalc(true)} className="text-blue-600 hover:underline text-[10px] flex items-center"><Calculator className="w-3 h-3"/> مساعد</button></label><input className="w-full p-2 border rounded" value={tempMed.concentration} onChange={e=>setTempMed({...tempMed, concentration:e.target.value})} placeholder="500mg"/></div>
                      <div><label className="text-xs font-bold text-slate-500">التكرار</label><select className="w-full p-2 border rounded" value={tempMed.frequency} onChange={e=>setTempMed({...tempMed, frequency:e.target.value})}><option value="">اختر</option><option value="مرة يومياً">1 / يوم</option><option value="مرتين يومياً">2 / يوم</option><option value="3 مرات يومياً">3 / يوم</option><option value="عند اللزوم">عند اللزوم</option></select></div>
                      <div><label className="text-xs font-bold text-slate-500">المدة</label><input className="w-full p-2 border rounded" value={tempMed.duration} onChange={e=>setTempMed({...tempMed, duration:e.target.value})} placeholder="5 أيام"/></div>
                      <div><label className="text-xs font-bold text-slate-500">علاقة بالأكل</label><select className="w-full p-2 border rounded" value={tempMed.relation} onChange={e=>setTempMed({...tempMed, relation:e.target.value})}><option value="">اختر</option><option value="بعد الأكل">بعد الأكل</option><option value="قبل الأكل">قبل الأكل</option><option value="وسط الأكل">وسط الأكل</option></select></div>
@@ -348,7 +474,6 @@ export default function DoctorConsultationsPage() {
                </div>
             )}
 
-            {/* Step 5: Health Messages */}
             {step === 5 && (
                <div className="space-y-4 animate-in fade-in">
                   <h3 className="text-xl font-bold text-slate-800 mb-4">5. التثقيف الصحي</h3>
@@ -360,7 +485,6 @@ export default function DoctorConsultationsPage() {
                </div>
             )}
 
-            {/* Step 6: Follow Up & Notes */}
             {step === 6 && (
                <div className="space-y-4 animate-in fade-in">
                   <h3 className="text-xl font-bold text-slate-800 mb-4">6. المتابعة والملاحظات</h3>
@@ -369,7 +493,6 @@ export default function DoctorConsultationsPage() {
                </div>
             )}
 
-            {/* Step 7: Preview Prescription */}
             {step === 7 && selectedConsultation && (
                <div className="animate-in fade-in">
                   <div className="flex justify-between items-center mb-4 px-4">
