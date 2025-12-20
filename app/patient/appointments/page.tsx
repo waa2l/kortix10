@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
-import { Calendar, Clock, MapPin, CheckCircle } from 'lucide-react';
+// 1. تم إضافة User هنا 👇
+import { Calendar, Clock, MapPin, CheckCircle, User } from 'lucide-react';
 
 export default function PatientAppointments() {
   const [appointments, setAppointments] = useState<any[]>([]);
